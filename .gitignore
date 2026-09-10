@@ -1,0 +1,14 @@
+# Secrets — never commit the real config
+config.py
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Runtime data
+logs/
+dig_captures/
+dumps/
+*.db
+.claude/settings.local.json
