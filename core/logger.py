@@ -19,6 +19,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     time TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT '',
     event TEXT NOT NULL,
     capture TEXT
 )
@@ -29,10 +30,13 @@ class ActivityLogger:
     """SQLite-backed activity log: one row per completed help/dig task.
 
     Thread-safe: writes are guarded by a lock and the connection allows
-    cross-thread use (auto cycle and manual /run both record)."""
+    cross-thread use (auto cycle and manual /run both record).
 
-    def __init__(self, db_path: str = LOG_DB):
+    When user_id is set, fetches are scoped to that user only."""
+
+    def __init__(self, db_path: str = LOG_DB, user_id: str = ''):
         self.db_path = db_path
+        self.user_id = user_id
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -40,6 +44,14 @@ class ActivityLogger:
         with self._lock:
             self._conn.execute(_SCHEMA)
             self._conn.commit()
+            # Add user_id column to databases that predate this field.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE activity ADD COLUMN user_id TEXT NOT NULL DEFAULT ''"
+                )
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     def log_help(self):
         self._insert('help', None)
@@ -56,27 +68,37 @@ class ActivityLogger:
     def _insert(self, event: str, capture: Optional[str]):
         with self._lock:
             self._conn.execute(
-                'INSERT INTO activity (time, event, capture) VALUES (?, ?, ?)',
-                (time.strftime('%Y-%m-%d %H:%M:%S'), event, capture),
+                'INSERT INTO activity (time, user_id, event, capture) VALUES (?, ?, ?, ?)',
+                (time.strftime('%Y-%m-%d %H:%M:%S'), self.user_id, event, capture),
             )
             self._conn.commit()
 
     def fetch_all(self, limit: Optional[int] = None):
-        """All records, oldest first. Pass limit for the most recent N."""
-        query = 'SELECT * FROM activity ORDER BY id DESC'
-        params = ()
+        """Records scoped to this logger's user_id, oldest first.
+        Pass limit for the most recent N. Empty user_id returns all records."""
+        params = []
+        where = ''
+        if self.user_id:
+            where = 'WHERE user_id = ? '
+            params.append(self.user_id)
+        query = f'SELECT * FROM activity {where}ORDER BY id DESC'
         if limit:
             query += ' LIMIT ?'
-            params = (int(limit),)
+            params.append(int(limit))
         with self._lock:
             rows = self._conn.execute(query, params).fetchall()
         return [dict(r) for r in reversed(rows)]
 
     def fetch_by_id(self, record_id: int):
-        """One record by its id, or None if it doesn't exist."""
+        """One record by id (scoped to this logger's user_id), or None."""
+        where = 'id = ?'
+        params = [int(record_id)]
+        if self.user_id:
+            where += ' AND user_id = ?'
+            params.append(self.user_id)
         with self._lock:
             row = self._conn.execute(
-                'SELECT * FROM activity WHERE id = ?', (int(record_id),)
+                f'SELECT * FROM activity WHERE {where}', params
             ).fetchone()
         return dict(row) if row else None
 

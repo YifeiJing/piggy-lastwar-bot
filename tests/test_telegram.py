@@ -45,12 +45,23 @@ class FakeOCREngine:
         return any(target_text in text for text in self.texts)
 
 
+class FakeDriver:
+    _NOISE = np.random.RandomState(1).randint(0, 256, (90, 160, 3), dtype=np.uint8)
+
+    def __init__(self, img=_NOISE):
+        self.img = img
+
+    def screenshot(self):
+        return self.img
+
+
 class TestHistoryCommands(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.logger = ActivityLogger(os.path.join(self._tmp.name, 'activity.db'))
         self.ocr = FakeOCREngine()
         self.engine = StubEngine(self.logger, self.ocr)
+        # Legacy single-engine form: controller wraps it in a dict internally.
         self.controller = TelegramController(self.engine, None)
         self.bot = FakeBot()
         # Replace the real bot with the fake — no network calls
@@ -70,7 +81,7 @@ class TestHistoryCommands(unittest.TestCase):
     # ---- /history ----
 
     def test_empty_db_reports_no_records(self):
-        self._run(self.controller._send_history(123, 10))
+        self._run(self.controller._send_history(123, self.engine, 10))
         self.assertEqual(self.bot.messages, ['📋 No records yet.'])
         self.assertEqual(self.bot.photos, [])
 
@@ -81,7 +92,7 @@ class TestHistoryCommands(unittest.TestCase):
         self.logger.log_dig(file_name)
         ids = [r['id'] for r in self.logger.fetch_all()]
 
-        self._run(self.controller._send_history(123, 10))
+        self._run(self.controller._send_history(123, self.engine, 10))
 
         self.assertEqual(len(self.bot.messages), 1)
         summary = self.bot.messages[0]
@@ -101,7 +112,7 @@ class TestHistoryCommands(unittest.TestCase):
         self.logger.log_dig(file_name)
         record_id = self.logger.fetch_all()[0]['id']
 
-        self._run(self.controller._send_record(123, record_id))
+        self._run(self.controller._send_record(123, self.engine, record_id))
 
         self.assertEqual(len(self.bot.messages), 1)
         self.assertTrue(self.bot.messages[0].startswith('#'), self.bot.messages[0])
@@ -113,14 +124,14 @@ class TestHistoryCommands(unittest.TestCase):
         self.logger.log_help()
         record_id = self.logger.fetch_all()[0]['id']
 
-        self._run(self.controller._send_record(123, record_id))
+        self._run(self.controller._send_record(123, self.engine, record_id))
 
         self.assertEqual(len(self.bot.messages), 1)
         self.assertIn('help', self.bot.messages[0])
         self.assertEqual(self.bot.photos, [])
 
     def test_record_unknown_id(self):
-        self._run(self.controller._send_record(123, 999))
+        self._run(self.controller._send_record(123, self.engine, 999))
         self.assertEqual(self.bot.messages, ['❌ No record with id 999.'])
         self.assertEqual(self.bot.photos, [])
 
@@ -128,7 +139,7 @@ class TestHistoryCommands(unittest.TestCase):
         self.logger.log_dig('dig_missing.jpg')
         record_id = self.logger.fetch_all()[0]['id']
 
-        self._run(self.controller._send_record(123, record_id))
+        self._run(self.controller._send_record(123, self.engine, record_id))
 
         self.assertEqual(len(self.bot.messages), 2)
         self.assertTrue(any('is missing' in m for m in self.bot.messages), self.bot.messages)
@@ -143,7 +154,7 @@ class TestHistoryCommands(unittest.TestCase):
         self.bot = FakeBot(photo_error=BadRequest('Image_process_failed'))
         self.controller.application.bot = self.bot
 
-        self._run(self.controller._send_record(123, record_id))
+        self._run(self.controller._send_record(123, self.engine, record_id))
 
         self.assertEqual(self.bot.photos, [])
         self.assertTrue(any(f"Couldn't send capture {file_name}" in m for m in self.bot.messages), self.bot.messages)
@@ -151,8 +162,7 @@ class TestHistoryCommands(unittest.TestCase):
     # ---- /capture ----
 
     def test_capture_saves_file_and_replies(self):
-        self.controller.driver = FakeDriver()
-        result = self._run(self.controller._save_capture(123, 'manual'))
+        result = self._run(self.controller._save_capture(123, FakeDriver(), 'manual'))
         self.assertTrue(result)
         self.assertTrue(any('💾 Saved' in m and 'manual_' in m for m in self.bot.messages), self.bot.messages)
         files = [f for f in os.listdir(self._tmp.name) if f.endswith('.jpg')]
@@ -160,43 +170,28 @@ class TestHistoryCommands(unittest.TestCase):
         self.assertTrue(files[0].startswith('manual_'), files)
 
     def test_capture_failure_when_screenshot_none(self):
-        self.controller.driver = FakeDriver(img=None)
-        result = self._run(self.controller._save_capture(123, 'manual'))
+        result = self._run(self.controller._save_capture(123, FakeDriver(img=None), 'manual'))
         self.assertFalse(result)
         self.assertTrue(any('❌ Screenshot failed' in m for m in self.bot.messages))
 
     # ---- /ocr ----
 
     def test_ocr_recognizes_screen_text(self):
-        self.controller.driver = FakeDriver()
-        self._run(self.controller._recognize_text(123))
+        self._run(self.controller._recognize_text(123, self.engine, FakeDriver()))
         self.assertTrue(any('Gift Available' in m for m in self.bot.messages), self.bot.messages)
 
     def test_ocr_no_text_recognized(self):
         self.ocr.texts = []
-        self.controller.driver = FakeDriver()
-        self._run(self.controller._recognize_text(123))
-        self.assertTrue(any('No text recognized' in m for m in self.bot.messages), self.bot.messages)
+        self._run(self.controller._recognize_text(123, self.engine, FakeDriver()))
+        self.assertTrue(any('No text recognized' in m for m in self.bot.messages))
 
     def test_ocr_check_text_found(self):
-        self.controller.driver = FakeDriver()
-        self._run(self.controller._check_text(123, 'Gift'))
+        self._run(self.controller._check_text(123, self.engine, FakeDriver(), 'Gift'))
         self.assertTrue(any("✅ Found 'Gift' on screen." in m for m in self.bot.messages), self.bot.messages)
 
     def test_ocr_check_text_not_found(self):
-        self.controller.driver = FakeDriver()
-        self._run(self.controller._check_text(123, 'gold'))
+        self._run(self.controller._check_text(123, self.engine, FakeDriver(), 'gold'))
         self.assertTrue(any("❌ 'gold' not found on screen." in m for m in self.bot.messages), self.bot.messages)
-
-
-class FakeDriver:
-    _NOISE = np.random.RandomState(1).randint(0, 256, (90, 160, 3), dtype=np.uint8)
-
-    def __init__(self, img=_NOISE):
-        self.img = img
-
-    def screenshot(self):
-        return self.img
 
 
 if __name__ == '__main__':
