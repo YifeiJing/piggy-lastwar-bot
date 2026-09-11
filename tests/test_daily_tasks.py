@@ -6,16 +6,21 @@ import unittest
 import numpy as np
 
 import tasks.daily_tasks as dt_mod
-from tasks.daily_tasks import GameLaunchTask, LuckyGiftTask, SendChatFlowerTask
+from core.cancel import TaskKilled, kill_event
+from tasks.daily_tasks import ExitStuckStateTask, GameLaunchTask, LuckyGiftTask, SendChatFlowerTask
 
 
 class FakeDriver:
-    def __init__(self, screen=None):
+    _NOISE = np.zeros((90, 160, 3), dtype=np.uint8)
+
+    def __init__(self, screen=_NOISE):
         self.backs = 0
         self.taps = []
-        self.screen = screen if screen is not None else np.zeros((90, 160, 3), dtype=np.uint8)
+        self.screenshots = 0
+        self.screen = screen
 
     def screenshot(self):
+        self.screenshots += 1
         return self.screen
 
     def press_back(self):
@@ -104,6 +109,103 @@ class FakeMatcher:
 
     def find_template(self, *args, **kwargs):
         return self.result
+
+
+class FakeMatcherByTemplate:
+    """find_template keyed on the template file basename; records searches."""
+
+    def __init__(self, positions):
+        self.positions = positions  # basename -> (x, y) or None
+        self.searches = []
+
+    def find_template(self, screen, template_path, threshold=0.82):
+        name = os.path.basename(template_path)
+        self.searches.append(name)
+        return self.positions.get(name)
+
+
+class TestExitStuckStateTask(unittest.TestCase):
+    def setUp(self):
+        kill_event.clear()
+
+    def tearDown(self):
+        kill_event.clear()
+
+    def _make_task(self, driver, positions):
+        task = ExitStuckStateTask(driver)
+        task.matcher = FakeMatcherByTemplate(positions)
+        return task
+
+    def test_healthy_screen_uses_one_screenshot(self):
+        driver = FakeDriver()
+        task = self._make_task(driver, {'base_btn.png': (100, 100)})
+        self.assertTrue(task.run())
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [])
+        # base_btn found: world/shop/distance checks are short-circuited
+        self.assertNotIn('shop_btn.png', task.matcher.searches)
+
+    def test_healthy_screen_dismisses_distance_hud(self):
+        driver = FakeDriver()
+        task = self._make_task(driver, {
+            'base_btn.png': (100, 100),
+            'base_distance_btn.png': (400, 800),
+        })
+        self.assertTrue(task.run())
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [(400, 800)])
+
+    def test_chat_stuck_taps_go_back_from_same_frame(self):
+        driver = FakeDriver()
+        task = self._make_task(driver, {'go_back_btn.png': (60, 1500)})
+        self.assertTrue(task.run())
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [(60, 1500)])
+
+    def test_gather_stuck_taps_cancel_from_same_frame(self):
+        driver = FakeDriver()
+        task = self._make_task(driver, {
+            'gather_location_confirm_frame.png': (200, 200),
+            'gather_location_cancel_btn.png': (400, 700),
+        })
+        self.assertTrue(task.run())
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [(400, 700)])
+
+    def test_gather_stuck_without_cancel_returns_false(self):
+        driver = FakeDriver()
+        task = self._make_task(driver, {'gather_location_confirm_frame.png': (200, 200)})
+        self.assertFalse(task.run())
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [])
+
+    def test_base_stuck_opens_and_exits_shop(self):
+        driver = FakeDriver()
+        task = self._make_task(driver, {
+            'shop_btn.png': (300, 400),
+            'shop_exit_btn.png': (800, 800),
+        })
+        self.assertTrue(task.run())
+        # one detection frame + one fresh frame for the shop exit wait
+        self.assertEqual(driver.screenshots, 2)
+        self.assertEqual(driver.taps, [(300, 400), (800, 800)])
+
+    def test_base_stuck_without_shop_returns_false(self):
+        driver = FakeDriver()
+        task = self._make_task(driver, {})
+        self.assertFalse(task.run())
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [])
+
+    def test_screenshot_none_returns_false(self):
+        task = ExitStuckStateTask(FakeDriver(screen=None))
+        self.assertFalse(task.run())
+
+    def test_kill_event_aborts(self):
+        kill_event.set()
+        task = ExitStuckStateTask(FakeDriver())
+        with self.assertRaises(TaskKilled):
+            task.run()
 
 
 class TestGameLaunchTask(unittest.TestCase):

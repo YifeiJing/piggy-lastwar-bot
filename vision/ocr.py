@@ -54,3 +54,13 @@ class OCREngine:
         if image is None:
             raise ValueError(f"Could not read the image at {image_path}")
         return ' '.join(self.extract_texts(image))
+        
+    def get_text_position(self, image, target_text: str):
+        """Returns the bounding box of the target_text if found, else None."""
+        if image is None:
+            return None
+        result = self._engine()(image)
+        for text, box in zip(result.txts or [], result.boxes or []):
+            if target_text in text:
+                return box  # Return the bounding box of the first match
+        return None

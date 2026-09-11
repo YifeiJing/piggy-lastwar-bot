@@ -51,23 +51,46 @@ class SendChatFlowerTask(BaseTask):
         return False
         
 class ExitStuckStateTask(BaseTask):
+    """Exit any stuck screen state.
+
+    Performance note: detection uses a SINGLE screenshot — all templates are
+    matched against the same frame and taps happen directly from it. Fresh
+    screenshots are only taken when the screen changes (shop exit wait)."""
+
     def run(self):
-        
-        if self.check_exists(os.path.join(ASSETS_DIR, 'go_back_btn.png'), threshold=0.8):
+        self._raise_if_killed()
+        screen = self.driver.screenshot()
+        if screen is None:
+            return False
+
+        pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'go_back_btn.png'), threshold=0.8)
+        if pos:
             print("[*] Starting: Exit stuck state... [chat]")
-            return self.wait_and_click(os.path.join(ASSETS_DIR, 'go_back_btn.png'), timeout=2)
-            
-        if self.check_exists(os.path.join(ASSETS_DIR, 'gather_location_confirm_frame.png'), threshold=0.8):
+            self.driver.tap(pos[0], pos[1])
+            return True
+
+        pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'gather_location_confirm_frame.png'), threshold=0.8)
+        if pos:
             print("[*] Starting: Exit stuck state... [gather]")
-            return self.wait_and_click(os.path.join(ASSETS_DIR, 'gather_location_cancel_btn.png'), timeout=2)
-        
-        if not self.check_exists(os.path.join(ASSETS_DIR, 'base_btn.png'), threshold=0.8) and not self.check_exists(os.path.join(ASSETS_DIR, 'world_btn.png'), threshold=0.8):
+            pos_cancel = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'gather_location_cancel_btn.png'), threshold=0.8)
+            if pos_cancel:
+                self.driver.tap(pos_cancel[0], pos_cancel[1])
+                return True
+            return False
+
+        if (self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'base_btn.png'), threshold=0.8) is None
+                and self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'world_btn.png'), threshold=0.8) is None):
             print("[*] Starting: Exit stuck state... [base]")
-            res = self.wait_and_click(os.path.join(ASSETS_DIR, 'shop_btn.png'), 1)
-            if res:
+            pos_shop = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'shop_btn.png'))
+            if pos_shop:
+                self.driver.tap(pos_shop[0], pos_shop[1])
                 return self.wait_and_click(os.path.join(ASSETS_DIR, 'shop_exit_btn.png'), 1)
-            else:
-                return False
+            return False
+
+        # Healthy base view: dismiss the distance HUD if present
+        pos_distance = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'base_distance_btn.png'), threshold=0.8)
+        if pos_distance:
+            self.driver.tap(pos_distance[0], pos_distance[1])
         return True
 
 class GameLaunchTask(BaseTask):
@@ -207,26 +230,28 @@ class DigTask(BaseTask):
                         return False
                     
 
-                if (self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=5)):
-                    # Wait for the dig action to complete
-                    while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.2)):
-                        # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
-                        if (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png')) or not self.check_text_exists("挖掘點")):
-                            break
-                        # time.sleep(0.1)
-                    self._notify("[+] Gift collected.")
-                    time.sleep(0.5)
-                    # Save the reward screen for the activity log
-                    self.last_capture_id = save_capture(self.driver.screenshot())
-                    # Exit gift page
-                    # self.driver.tap(450, 1300, jitter=3, sleep_time=0.3)
-                    self.driver.press_back()
-                    time.sleep(0.5)
-                    send_chat_flower_task = SendChatFlowerTask(self.driver)
-                    send_chat_flower_task.run()
-                    time.sleep(0.5)
-                    self.wait_and_click(os.path.join(ASSETS_DIR, 'base_btn.png'), timeout=5)
-                    return True
+                self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=5)
+                # Wait for the dig action to complete
+                cnt = 0
+                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.35)):
+                    # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
+                    if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png')) or not self.check_text_exists("挖掘點"))):
+                        break
+                    cnt += 1
+                    # time.sleep(0.1)
+                self._notify("[+] Gift collected.")
+                time.sleep(0.5)
+                # Save the reward screen for the activity log
+                self.last_capture_id = save_capture(self.driver.screenshot())
+                # Exit gift page
+                # self.driver.tap(450, 1300, jitter=3, sleep_time=0.3)
+                self.driver.press_back()
+                time.sleep(0.5)
+                send_chat_flower_task = SendChatFlowerTask(self.driver)
+                send_chat_flower_task.run()
+                time.sleep(0.5)
+                self.wait_and_click(os.path.join(ASSETS_DIR, 'base_btn.png'), timeout=5)
+                return True
 
         return False
 
@@ -260,3 +285,25 @@ class LuckyGiftTask(BaseTask):
                     self.wait_and_click(os.path.join(ASSETS_DIR, 'go_back_btn.png'), timeout=2)
                     return True
         return False
+
+class JoinDETask(BaseTask):
+    """Join the DE alliance if not already a member."""
+    def run(self):
+        print("[*] Starting: Join DE Alliance Task...")
+        btn_alliance = os.path.join(ASSETS_DIR, 'rally_available_notification.png')
+        btn_join_de = os.path.join(ASSETS_DIR, 'btn_join_de.png')
+
+        # 1. Locate alliance button
+        if not self.wait_and_click(btn_alliance, timeout=5):
+            print("[-] Alliance button not found, skipping task.")
+            return False
+
+        # 2. Join DE alliance
+        if not self.wait_and_click(btn_join_de, timeout=5):
+            print("[-] Join DE button not found or already a member.")
+            self.driver.press_back()
+            return False
+
+        print("[+] Successfully joined DE alliance.")
+        self.driver.press_back()
+        return True
