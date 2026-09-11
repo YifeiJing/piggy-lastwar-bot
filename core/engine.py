@@ -27,6 +27,10 @@ TASK_MAP = {
     'flower': SendChatFlowerTask
 }
 
+# Tasks that participate in the automatic cycle and can be toggled on/off.
+# 'launch' is not included — it always runs at the top of every cycle.
+CYCLE_TASKS = frozenset({'help', 'dig', 'lucky_gift'})
+
 
 class Stats:
     def __init__(self):
@@ -53,15 +57,20 @@ class BotEngine:
     requested tasks. The loop thread never exits; /stop only halts the
     automatic cycle so manual /run commands still work."""
 
-    def __init__(self, driver: AdbDriver, cycle_interval: float = 3.0, logger: ActivityLogger = None):
+    def __init__(self, driver: AdbDriver, cycle_interval: float = 3.0,
+                 logger: ActivityLogger = None, user_id: str = '',
+                 enabled_tasks=None):
+        self.user_id = user_id
         self.driver = driver
         self.stats = Stats()
+        self.enabled_tasks: set = set(enabled_tasks) if enabled_tasks is not None else set(CYCLE_TASKS)
         self.cycle_interval = cycle_interval
-        self.logger = logger or ActivityLogger()
+        self.logger = logger or ActivityLogger(user_id=user_id)
         self.command_queue = queue.Queue()
         self.stop_event = threading.Event()   # set = auto loop stopped
         self.pause_event = threading.Event()  # set = paused
         self.exit_event = threading.Event()   # set = process shutdown
+        self.stop_event.set()                 # start in stopped state; /start to begin
         self.ocr_engine = OCREngine.shared()
         self.current_task = None
         self._notifier = None
@@ -133,6 +142,27 @@ class BotEngine:
             return
         self.command_queue.put(('run', name))
         self._notify(f"🕒 Task '{name}' queued — it will run when the current task finishes.")
+
+    def enable_task(self, name: str):
+        if name not in CYCLE_TASKS:
+            self._notify(f"❓ '{name}' is not a cycle task. Toggleable: {', '.join(sorted(CYCLE_TASKS))}")
+            return
+        self.enabled_tasks.add(name)
+        self._notify(f"✅ Cycle task '{name}' enabled.")
+
+    def disable_task(self, name: str):
+        if name not in CYCLE_TASKS:
+            self._notify(f"❓ '{name}' is not a cycle task. Toggleable: {', '.join(sorted(CYCLE_TASKS))}")
+            return
+        self.enabled_tasks.discard(name)
+        self._notify(f"⏸️ Cycle task '{name}' disabled.")
+
+    def format_tasks(self) -> str:
+        lines = []
+        for name in sorted(CYCLE_TASKS):
+            icon = '✅' if name in self.enabled_tasks else '❌'
+            lines.append(f'{icon} {name}')
+        return 'Cycle tasks:\n' + '\n'.join(lines)
 
     def kill_task(self):
         """Abort the currently running task (dead-loop rescue).
@@ -233,20 +263,25 @@ class BotEngine:
             if self.stop_event.is_set() or self.pause_event.is_set():
                 return
 
-        help_task = AllianceHelpTask(self.driver)
-        if help_task.run():
-            self.stats.alliance_help_count += 1
-            self._record_task('help', help_task)
-        dig_task = DigTask(self.driver)
-        dig_task.set_notifier(self._notify)
-        if dig_task.run():
-            self.stats.dig_count += 1
-            self._record_task('dig', dig_task)
-        lucky_gift_task = LuckyGiftTask(self.driver)
-        lucky_gift_task.set_notifier(self._notify)
-        if lucky_gift_task.run():
-            self.stats.lucky_gift_count += 1
-            self._record_task('lucky_gift', lucky_gift_task)
+        if 'help' in self.enabled_tasks:
+            help_task = AllianceHelpTask(self.driver)
+            if help_task.run():
+                self.stats.alliance_help_count += 1
+                self._record_task('help', help_task)
+
+        if 'dig' in self.enabled_tasks:
+            dig_task = DigTask(self.driver)
+            dig_task.set_notifier(self._notify)
+            if dig_task.run():
+                self.stats.dig_count += 1
+                self._record_task('dig', dig_task)
+
+        if 'lucky_gift' in self.enabled_tasks:
+            lucky_gift_task = LuckyGiftTask(self.driver)
+            lucky_gift_task.set_notifier(self._notify)
+            if lucky_gift_task.run():
+                self.stats.lucky_gift_count += 1
+                self._record_task('lucky_gift', lucky_gift_task)
         if self._detect_logout():
             self.stats.print_stats()
             self.driver.tap(450, 900)

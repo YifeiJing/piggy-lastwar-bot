@@ -114,9 +114,11 @@ class TestStateMachine(EngineTestCase):
     def test_status_and_guard_transitions(self):
         e = self.engine
         e.start()
-        self.assertEqual(e.status, 'RUNNING')
+        self.assertEqual(e.status, 'STOPPED')  # starts stopped
 
         e.start_loop()
+        self.assertEqual(e.status, 'RUNNING')
+        e.start_loop()     # guard: already running
         e.pause()
         self.assertEqual(e.status, 'PAUSED')
         e.pause()          # guard: already paused
@@ -130,6 +132,7 @@ class TestStateMachine(EngineTestCase):
         self.assertEqual(e.status, 'RUNNING')
 
         self.assertEqual(self.messages, [
+            '▶️ Auto loop started.',
             'ℹ️ Auto loop is already running.',
             '⏸️ Paused. Send /resume to continue.',
             'ℹ️ Auto loop is not running.',
@@ -189,6 +192,7 @@ class TestLoopRecovery(EngineTestCase):
         self._patch_tasks()
         e = self.engine
         e.start()
+        e.start_loop()
 
         self.assertTrue(wait_for(e.stop_event.is_set, timeout=10))
         self.assertIn('⚠️ Stuck state detected and recovery failed — auto loop stopped. Send /start to resume.', self.messages)
@@ -203,6 +207,7 @@ class TestLoopRecovery(EngineTestCase):
         self.engine = e
         self._patch_tasks()
         e.start()
+        e.start_loop()
 
         self.assertTrue(wait_for(e.stop_event.is_set, timeout=10))
         self.assertIn('⚠️ Logout detected — auto loop stopped. Send /start to resume.', self.messages)
@@ -234,10 +239,11 @@ class TestKillTask(EngineTestCase):
         self.assertTrue(wait_for(
             lambda: any("🗡️ Task 'help' killed." == m for m in self.messages), timeout=5))
 
-        # The engine survives the kill and can keep running
+        # The engine thread survives the kill; loop remains in stopped state
+        # (engine started stopped — only /start changes that).
         self.assertTrue(e._thread.is_alive())
         self.assertIsNone(e.current_task)
-        self.assertEqual(e.status, 'RUNNING')
+        self.assertEqual(e.status, 'STOPPED')
 
     def test_kill_with_no_running_task_reports_idle(self):
         e = self.engine
@@ -256,6 +262,7 @@ class TestFullDryRun(EngineTestCase):
     def test_real_cycle_on_fake_screen_terminates_cleanly(self):
         e = self.engine
         e.start()
+        e.start_loop()
 
         # On a noise screen no template ever matches: the cycle should detect
         # the "stuck" state, fail to recover, stop the loop — and never crash.
