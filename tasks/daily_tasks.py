@@ -181,7 +181,7 @@ class DigTask(BaseTask):
                 pos_dig_btn = (450, 700)
                 self.driver.tap(pos_dig_btn[0], pos_dig_btn[1], jitter=3, sleep_time=0.3)
                 save_capture(self.driver.screenshot())
-                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'dig_btn.png'), timeout=2)):
+                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'dig_btn.png'), timeout=1) and not self.wait_and_click(os.path.join(ASSETS_DIR, 'fix_btn.png'), timeout=1)):
                     exit_stuck_task = ExitStuckStateTask(self.driver)
                     if exit_stuck_task.run():
                         self._notify('⚠️ Stuck state detected and exited during dig task.')
@@ -209,7 +209,7 @@ class DigTask(BaseTask):
 
                 if (self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=5)):
                     # Wait for the dig action to complete
-                    while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.05)):
+                    while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.2)):
                         # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
                         if (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png')) or not self.check_text_exists("挖掘點")):
                             break
