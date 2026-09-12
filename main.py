@@ -31,6 +31,7 @@ def main():
         controller = TelegramController(engines, drivers)
         for uid, eng in engines.items():
             eng.set_notifier(lambda text, u=uid: controller.send_message(text, u))
+            eng.set_photo_notifier(lambda name, capture, u=uid: controller.send_capture(u, capture, name))
             eng.start()
         controller.run()  # blocks (polling) until Ctrl+C
     else:

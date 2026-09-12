@@ -103,6 +103,7 @@ class EngineTestCase(unittest.TestCase):
         for name, cls in self._orig_tasks.items():
             setattr(engine_mod, name, cls)
         engine_mod.TASK_MAP['help'] = self._orig_tasks['AllianceHelpTask']
+        engine_mod.TASK_MAP['dig'] = self._orig_tasks['DigTask']
         engine_mod.TASK_MAP['lucky_gift'] = self._orig_tasks['LuckyGiftTask']
         engine_mod.TASK_MAP['launch'] = self._orig_tasks['GameLaunchTask']
         kill_event.clear()
@@ -364,6 +365,50 @@ class TestActivityRecording(EngineTestCase):
         records = self._read_records()
         self.assertEqual(records[0]['event'], 'launch')
         self.assertIsNone(records[0]['capture'])
+
+    def test_photo_notifier_fired_on_successful_capture_tasks(self):
+        class FakeCaptureTask:
+            last_capture_id = 'fake.jpg'
+
+            def __init__(self, driver):
+                pass
+
+            def run(self):
+                return True
+
+        engine_mod.TASK_MAP['dig'] = FakeCaptureTask
+        engine_mod.TASK_MAP['lucky_gift'] = FakeCaptureTask
+        photos = []
+        self.engine.set_photo_notifier(lambda name, capture: photos.append((name, capture)))
+        e = self.engine
+        e.start()
+
+        e.run_task('dig')
+        e.run_task('lucky_gift')
+        self.assertTrue(wait_for(lambda: len(photos) == 2, timeout=5))
+        self.assertEqual(photos, [('dig', 'fake.jpg'), ('lucky_gift', 'fake.jpg')])
+
+    def test_photo_notifier_not_fired_on_failure(self):
+        class FakeFailTask:
+            last_capture_id = 'fake.jpg'
+
+            def __init__(self, driver):
+                pass
+
+            def run(self):
+                return False
+
+        engine_mod.TASK_MAP['dig'] = FakeFailTask
+        photos = []
+        self.engine.set_photo_notifier(lambda name, capture: photos.append((name, capture)))
+        e = self.engine
+        e.start()
+
+        e.run_task('dig')
+        self.assertTrue(wait_for(
+            lambda: any("✅ Task 'dig' failed." == m for m in self.messages), timeout=5))
+        time.sleep(0.3)
+        self.assertEqual(photos, [])
 
 
 if __name__ == '__main__':

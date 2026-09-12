@@ -74,6 +74,7 @@ class BotEngine:
         self.ocr_engine = OCREngine.shared()
         self.current_task = None
         self._notifier = None
+        self._photo_notifier = None
         self._thread = None
 
     # ---- remote control API ----
@@ -81,6 +82,10 @@ class BotEngine:
     def set_notifier(self, fn):
         """fn(text) is called on engine events (logout, task results...)."""
         self._notifier = fn
+
+    def set_photo_notifier(self, fn):
+        """fn(name, capture_name) is called when a reward capture is saved."""
+        self._photo_notifier = fn
 
     @property
     def status(self) -> str:
@@ -223,6 +228,7 @@ class BotEngine:
             result = task.run()
             if result:
                 self._record_task(name, task)
+                self._notify_capture(name, task)
             self._notify(f"✅ Task '{name}' {'succeeded.' if result else 'failed.'}")
         except TaskKilled:
             self._notify(f"🗡️ Task '{name}' killed.")
@@ -244,6 +250,16 @@ class BotEngine:
             # cycle's "already running" check.
             if getattr(task, 'just_launched', False):
                 self.logger.log_launch()
+
+    def _notify_capture(self, name: str, task):
+        """Send the task's reward capture to the user (photo notifier)."""
+        capture = getattr(task, 'last_capture_id', None)
+        if not capture or not self._photo_notifier:
+            return
+        try:
+            self._photo_notifier(name, capture)
+        except Exception as e:
+            print(f"[-] Photo notifier error: {e}")
 
     def _game_cycle(self):
         kill_event.clear()
@@ -275,6 +291,7 @@ class BotEngine:
             if dig_task.run():
                 self.stats.dig_count += 1
                 self._record_task('dig', dig_task)
+                self._notify_capture('dig', dig_task)
 
         if 'lucky_gift' in self.enabled_tasks:
             lucky_gift_task = LuckyGiftTask(self.driver)
@@ -282,6 +299,7 @@ class BotEngine:
             if lucky_gift_task.run():
                 self.stats.lucky_gift_count += 1
                 self._record_task('lucky_gift', lucky_gift_task)
+                self._notify_capture('lucky_gift', lucky_gift_task)
         if self._detect_logout():
             self.stats.print_stats()
             self.driver.tap(450, 900)

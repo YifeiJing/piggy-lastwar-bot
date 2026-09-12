@@ -203,7 +203,7 @@ class DigTask(BaseTask):
                 # Here hard code the position because the dig button is hard to match, and the extravacator is always at the center of the screen, so we can calculate the position of the dig button based on the center of the screen
                 pos_dig_btn = (450, 700)
                 self.driver.tap(pos_dig_btn[0], pos_dig_btn[1], jitter=3, sleep_time=0.3)
-                save_capture(self.driver.screenshot())
+                # save_capture(self.driver.screenshot())
                 while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'dig_btn.png'), timeout=1) and not self.wait_and_click(os.path.join(ASSETS_DIR, 'fix_btn.png'), timeout=1)):
                     exit_stuck_task = ExitStuckStateTask(self.driver)
                     if exit_stuck_task.run():
@@ -212,6 +212,7 @@ class DigTask(BaseTask):
                         go_to_chat_task = GoToChatTask(self.driver)
                         if go_to_chat_task.run():
                             time.sleep(0.5)
+                            self.wait_and_click(os.path.join(ASSETS_DIR, 'notification_close_btn.png'), timeout=1)
                             if self.wait_and_click(os.path.join(ASSETS_DIR, 'location_share_frame.png'), timeout=2):
                                 time.sleep(1)
                                 self.driver.tap(pos_dig_btn[0], pos_dig_btn[1], jitter=3, sleep_time=0.3)
@@ -232,24 +233,28 @@ class DigTask(BaseTask):
 
                 self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=5)
                 # Wait for the dig action to complete
-                cnt = 0
+                cnt = 1
+                gift_collected = True
                 while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.35)):
                     # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
-                    if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png')) or not self.check_text_exists("挖掘點"))):
+                    if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png')) or (not self.check_text_exists("挖掘點") and not self.check_text_exists("實驗無人機")))):
+                        gift_collected = False
                         break
                     cnt += 1
                     # time.sleep(0.1)
-                self._notify("[+] Gift collected.")
+                if gift_collected:
+                    self._notify("[+] Gift collected.")
                 time.sleep(0.5)
                 # Save the reward screen for the activity log
                 self.last_capture_id = save_capture(self.driver.screenshot())
                 # Exit gift page
                 # self.driver.tap(450, 1300, jitter=3, sleep_time=0.3)
-                self.driver.press_back()
-                time.sleep(0.5)
-                send_chat_flower_task = SendChatFlowerTask(self.driver)
-                send_chat_flower_task.run()
-                time.sleep(0.5)
+                if gift_collected:
+                    self.driver.press_back()
+                    time.sleep(0.5)
+                    send_chat_flower_task = SendChatFlowerTask(self.driver)
+                    send_chat_flower_task.run()
+                    time.sleep(0.5)
                 self.wait_and_click(os.path.join(ASSETS_DIR, 'base_btn.png'), timeout=5)
                 return True
 
@@ -283,6 +288,7 @@ class LuckyGiftTask(BaseTask):
                     self.last_capture_id = save_capture(self.driver.screenshot(), prefix='lucky_gift')
                     self.wait_and_click(os.path.join(ASSETS_DIR, 'lucky_gift_list_exit.jpg'), timeout=2)
                     self.wait_and_click(os.path.join(ASSETS_DIR, 'go_back_btn.png'), timeout=2)
+                    self._notify('[+] Lucky gift collected.')
                     return True
         return False
 

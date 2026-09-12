@@ -193,6 +193,47 @@ class TestHistoryCommands(unittest.TestCase):
         self._run(self.controller._check_text(123, self.engine, FakeDriver(), 'gold'))
         self.assertTrue(any("❌ 'gold' not found on screen." in m for m in self.bot.messages), self.bot.messages)
 
+    # ---- capture photo push (engine -> chat) ----
+
+    def test_send_capture_photo(self):
+        img = np.random.RandomState(1).randint(0, 256, (90, 160, 3), dtype=np.uint8)
+        file_name = save_capture(img, capture_dir=self._tmp.name)
+        caption = f'📸 dig reward — {file_name}'
+        self._run(self.controller._send_capture_photo(123, file_name, caption))
+        self.assertEqual(len(self.bot.photos), 1)
+        self.assertEqual(self.bot.photos[0][1], caption)
+
+    def test_send_capture_photo_missing_file(self):
+        self._run(self.controller._send_capture_photo(123, 'dig_missing.jpg', 'cap'))
+        self.assertTrue(any('is missing' in m for m in self.bot.messages))
+        self.assertEqual(self.bot.photos, [])
+
+    def test_screenshot_annotated_sends_grid_caption(self):
+        self._run(self.controller._send_screenshot(123, FakeDriver(), annotated=True))
+        self.assertEqual(len(self.bot.photos), 1)
+        self.assertIn('Grid step = 100 px', self.bot.photos[0][1])
+
+    def test_screenshot_plain_has_no_caption(self):
+        self._run(self.controller._send_screenshot(123, FakeDriver()))
+        self.assertEqual(len(self.bot.photos), 1)
+        self.assertIsNone(self.bot.photos[0][1])
+
+    def test_route_to_chats_respects_iam_and_setuser(self):
+        orig_access = tg_mod.TELEGRAM_CHAT_ACCESS
+        orig_allowed = tg_mod.TELEGRAM_ALLOWED_CHATS
+        tg_mod.TELEGRAM_ALLOWED_CHATS = []
+        tg_mod.TELEGRAM_CHAT_ACCESS = {100: 'admin', 200: ['olivia'], 300: ['bob']}
+        try:
+            self.assertEqual(set(self.controller._route_to_chats('olivia')), {100, 200})
+            self.assertEqual(set(self.controller._route_to_chats('bob')), {100, 300})
+            self.assertEqual(set(self.controller._route_to_chats('carol')), {100})
+            # A chat watching olivia doesn't get bob's notifications
+            self.controller._active_user[100] = 'olivia'
+            self.assertEqual(set(self.controller._route_to_chats('bob')), {300})
+        finally:
+            tg_mod.TELEGRAM_CHAT_ACCESS = orig_access
+            tg_mod.TELEGRAM_ALLOWED_CHATS = orig_allowed
+
 
 if __name__ == '__main__':
     unittest.main()

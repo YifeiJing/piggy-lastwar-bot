@@ -10,6 +10,7 @@ from telegram.ext import Application, MessageHandler, filters
 from config import DIG_CAPTURE_DIR, TELEGRAM_ALLOWED_CHATS, TELEGRAM_BOT_TOKEN
 from core.engine import TASK_MAP
 from core.logger import save_capture
+from vision.annotate import annotate_coordinates
 
 try:
     from config import TELEGRAM_CHAT_ACCESS
@@ -136,19 +137,70 @@ class TelegramController:
             return
         prefix = f'[{user_id}] ' if len(self.engines) > 1 and user_id else ''
         full_text = prefix + text
-        for chat_id in self._all_authorized_chat_ids():
-            # IAM: skip if this chat has no access to the notifying user.
-            if user_id and not self._can_access_user(chat_id, user_id):
-                continue
-            # Per-chat filter: skip if watching a different user.
-            active = self._active_user.get(chat_id)
-            if active is not None and user_id and active != user_id:
-                continue
+        for chat_id in self._route_to_chats(user_id):
             future = asyncio.run_coroutine_threadsafe(
                 self.application.bot.send_message(chat_id=chat_id, text=full_text),
                 self._loop,
             )
             future.add_done_callback(_log_send_result)
+
+    def _route_to_chats(self, user_id: str) -> list:
+        """Chat ids that should receive a notification for user_id.
+
+        IAM: chats with no access to the user are skipped. Per-chat /setuser
+        selection: chats watching a different user are skipped."""
+        targets = []
+        for chat_id in self._all_authorized_chat_ids():
+            if user_id and not self._can_access_user(chat_id, user_id):
+                continue
+            active = self._active_user.get(chat_id)
+            if active is not None and user_id and active != user_id:
+                continue
+            targets.append(chat_id)
+        return targets
+
+    def send_capture(self, user_id: str, capture_name: str, name: str = ''):
+        """Called from an engine thread to push a reward capture photo.
+
+        IAM-routed like send_message. The file is re-encoded before sending
+        (Telegram rejects JPEGs written by cv2.imwrite)."""
+        if self._loop is None:
+            print(f'[TG] (not sent, bot not ready): {capture_name}')
+            return
+        prefix = f'[{user_id}] ' if len(self.engines) > 1 and user_id else ''
+        if name:
+            caption = f'{prefix}📸 {name} reward — {capture_name}'
+        else:
+            caption = f'{prefix}📸 {capture_name}'
+        for chat_id in self._route_to_chats(user_id):
+            future = asyncio.run_coroutine_threadsafe(
+                self._send_capture_photo(chat_id, capture_name, caption),
+                self._loop,
+            )
+            future.add_done_callback(_log_send_result)
+
+    async def _send_capture_photo(self, chat_id: int, capture_name: str, caption: str):
+        bot = self.application.bot
+        path = os.path.join(DIG_CAPTURE_DIR, os.path.basename(capture_name))
+        if not os.path.exists(path):
+            await bot.send_message(chat_id=chat_id, text=f"⚠️ Capture file {capture_name} is missing.")
+            return
+        img = cv2.imread(path)
+        if img is None:
+            await bot.send_message(chat_id=chat_id, text=f"⚠️ Capture {capture_name} is unreadable.")
+            return
+        ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            await bot.send_message(chat_id=chat_id, text=f"⚠️ Capture {capture_name} failed to re-encode.")
+            return
+        try:
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=BytesIO(buf.tobytes()),
+                caption=caption,
+            )
+        except Exception as e:
+            await bot.send_message(chat_id=chat_id, text=f"⚠️ Couldn't send capture {capture_name}: {e}")
 
     def help_text(self, chat_id: int = 0) -> str:
         user_cmds = ''
@@ -161,7 +213,7 @@ class TelegramController:
         return (
             '📖 Commands:\n'
             '/status — engine state + screenshot\n'
-            '/screenshot — current screen\n'
+            '/screenshot — current screen + coordinate grid\n'
             '/capture [prefix] — save current screen to dig_captures/\n'
             '/ocr [text] — recognize screen text / check if text is on screen\n'
             f"/run <task> — run once: {', '.join(TASK_MAP)}\n"
@@ -276,7 +328,7 @@ class TelegramController:
             if not await self._send_screenshot(chat_id, driver):
                 await msg.reply_text('❌ Screenshot failed (device not reachable?)')
         elif cmd == '/screenshot':
-            if not await self._send_screenshot(chat_id, driver):
+            if not await self._send_screenshot(chat_id, driver, annotated=True):
                 await msg.reply_text('❌ Screenshot failed (device not reachable?)')
         elif cmd == '/capture':
             prefix = ''.join(c for c in args[0] if c.isalnum() or c == '_') if args else 'manual'
@@ -358,14 +410,19 @@ class TelegramController:
 
     # ---- helpers ----
 
-    async def _send_screenshot(self, chat_id: int, driver) -> bool:
+    async def _send_screenshot(self, chat_id: int, driver, annotated: bool = False) -> bool:
         img = await asyncio.to_thread(driver.screenshot)
         if img is None:
             return False
+        caption = None
+        if annotated:
+            img = await asyncio.to_thread(annotate_coordinates, img)
+            caption = '🖊️ Grid step = 100 px — x along the top, y along the left.'
         ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
             return False
-        await self.application.bot.send_photo(chat_id=chat_id, photo=BytesIO(buf.tobytes()))
+        await self.application.bot.send_photo(
+            chat_id=chat_id, photo=BytesIO(buf.tobytes()), caption=caption)
         return True
 
     async def _save_capture(self, chat_id: int, driver, prefix: str) -> bool:
