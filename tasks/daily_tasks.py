@@ -120,60 +120,6 @@ class GameLaunchTask(BaseTask):
                 print('Cannot find the game icon')
                 return False
 
-class AllianceDonationTask(BaseTask):
-    """Alliance tech donation automation task"""
-    def run(self):
-        print("[*] Starting: Alliance Donation Task...")
-        btn_alliance = os.path.join(ASSETS_DIR, 'btn_alliance.png')
-        btn_tech = os.path.join(ASSETS_DIR, 'btn_tech.png')
-        btn_donate = os.path.join(ASSETS_DIR, 'btn_donate.png')
-
-        # 1. Locate alliance button
-        if not self.wait_and_click(btn_alliance, timeout=5):
-            print("[-] Alliance button not found, skipping task.")
-            return False
-
-        # 2. Enter tech tree
-        if not self.wait_and_click(btn_tech, timeout=5):
-            print("[-] Tech tree button not found.")
-            self.driver.press_back()
-            return False
-
-        # 3. Donate loop
-        print("[*] Executing donation click sequence...")
-        donated_count = 0
-        for _ in range(25):
-            screen = self.driver.screenshot()
-            pos = self.matcher.find_template(screen, btn_donate, threshold=0.8)
-            if not pos:
-                break
-            self.driver.tap(pos[0], pos[1], jitter=2, sleep_time=0.25)
-            donated_count += 1
-
-        print(f"[+] Donation complete. Executed {donated_count} clicks.")
-        self.driver.press_back()
-        time.sleep(0.5)
-        self.driver.press_back()
-        return True
-
-
-class CollectResourcesTask(BaseTask):
-    """Base harvesting task"""
-    def run(self):
-        print("[*] Starting: Resource Collection Task...")
-        icon_food = os.path.join(ASSETS_DIR, 'icon_harvest_food.png')
-        icon_iron = os.path.join(ASSETS_DIR, 'icon_harvest_iron.png')
-        icon_gold = os.path.join(ASSETS_DIR, 'icon_harvest_gold.png')
-
-        for icon in [icon_food, icon_iron, icon_gold]:
-            if os.path.exists(icon):
-                screen = self.driver.screenshot()
-                pts = self.matcher.find_all_templates(screen, icon, threshold=0.8)
-                for pt in pts:
-                    self.driver.tap(pt[0], pt[1], jitter=3, sleep_time=0.3)
-        print("[+] Resource collection finished.")
-        return True
-
 class DigTask(BaseTask):
     """Digging task"""
     def __init__(self, driver):
@@ -201,7 +147,7 @@ class DigTask(BaseTask):
                 time.sleep(1)
                 # After clicking the shared location, the screen change to the world map with the extravacator at the center of the screen
                 # Here hard code the position because the dig button is hard to match, and the extravacator is always at the center of the screen, so we can calculate the position of the dig button based on the center of the screen
-                pos_dig_btn = (450, 700)
+                pos_dig_btn = (450, 740)
                 self.driver.tap(pos_dig_btn[0], pos_dig_btn[1], jitter=3, sleep_time=0.3)
                 # save_capture(self.driver.screenshot())
                 while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'dig_btn.png'), timeout=1) and not self.wait_and_click(os.path.join(ASSETS_DIR, 'fix_btn.png'), timeout=1)):
@@ -235,7 +181,7 @@ class DigTask(BaseTask):
                 # Wait for the dig action to complete
                 cnt = 1
                 gift_collected = True
-                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.35)):
+                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.7)):
                     # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
                     if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png')) or (not self.check_text_exists("挖掘點") and not self.check_text_exists("實驗無人機")))):
                         gift_collected = False

@@ -2,6 +2,7 @@
 from typing import Optional, Tuple, List
 import cv2
 import numpy as np
+import time
 
 
 class TemplateMatcher:
@@ -35,3 +36,14 @@ class TemplateMatcher:
         for pt in zip(*loc[::-1]):
             points.append((pt[0] + w // 2, pt[1] + h // 2))
         return points
+
+def measure_template_matching_performance(screen: np.ndarray, template_path: str, threshold: float = 0.82, iterations: int = 10, scan_range = None) -> float:
+    total_time = 0.0
+    screen_to_use = screen if scan_range is None else screen[scan_range[1]:scan_range[3], scan_range[0]:scan_range[2]]
+    for _ in range(iterations):
+        start_time = time.perf_counter()
+        TemplateMatcher.find_template(screen_to_use, template_path, threshold)
+        end_time = time.perf_counter()
+        total_time += (end_time - start_time)
+    average_time = total_time / iterations
+    return average_time

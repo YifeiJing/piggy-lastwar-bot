@@ -8,6 +8,7 @@ from typing import List
 
 import cv2
 from rapidocr import RapidOCR
+import time
 
 
 class OCREngine:
@@ -64,3 +65,15 @@ class OCREngine:
             if target_text in text:
                 return box  # Return the bounding box of the first match
         return None
+
+def measure_ocr_performance(image, iterations: int = 10) -> float:
+    """Measures the average time taken for OCR over a number of iterations."""
+    ocr_engine = OCREngine.shared()
+    total_time = 0.0
+    for _ in range(iterations):
+        start_time = time.perf_counter()
+        ocr_engine.extract_texts(image)
+        end_time = time.perf_counter()
+        total_time += (end_time - start_time)
+    average_time = total_time / iterations
+    return average_time
