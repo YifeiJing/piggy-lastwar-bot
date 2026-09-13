@@ -212,7 +212,7 @@ class DigTask(BaseTask):
                         go_to_chat_task = GoToChatTask(self.driver)
                         if go_to_chat_task.run():
                             time.sleep(0.5)
-                            self.wait_and_click(os.path.join(ASSETS_DIR, 'notification_close_btn.png'), timeout=1)
+                            self.wait_and_click(os.path.join(ASSETS_DIR, 'notification_close_btn.jpg'), timeout=1)
                             if self.wait_and_click(os.path.join(ASSETS_DIR, 'location_share_frame.png'), timeout=2):
                                 time.sleep(1)
                                 self.driver.tap(pos_dig_btn[0], pos_dig_btn[1], jitter=3, sleep_time=0.3)
