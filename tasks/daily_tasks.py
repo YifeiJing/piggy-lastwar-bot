@@ -216,7 +216,7 @@ class DigTask(BaseTask):
                     send_chat_flower_task = SendChatFlowerTask(self.driver)
                     send_chat_flower_task.run()
                     time.sleep(0.5)
-                self.wait_and_click(os.path.join(ASSETS_DIR, 'base_btn.png'), timeout=5)
+                # self.wait_and_click(os.path.join(ASSETS_DIR, 'base_btn.png'), timeout=5)
                 return True
 
         return False
@@ -259,6 +259,10 @@ class LuckyGiftTask(BaseTask):
         return False
 
 class JoinRallyTask(BaseTask):
+    def __init__(self, driver, rally_preference):
+        super().__init__(driver)
+        self._rally_preference = rally_preference
+
     def analyze_rally_info(self):
         frames = [30, 225, 862, 615, 36, 644, 860, 1025]
         screen = self.driver.screenshot()
@@ -281,25 +285,70 @@ class JoinRallyTask(BaseTask):
             for txt in ocr_res:
                 if 'Lv' in txt:
                     monster_level = int(txt[3:])
-            match_res = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'join_party_btn.png'), scan_area=frames[4*i:4*(i+1)])
-            if match_res:
-                res.append((monster_type, monster_level, True))
-            else:
-                res.append((monster_type, monster_level, False))
+            if monster_level != 0:
+                match_res = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'join_party_btn.png'), scan_area=frames[4*i:4*(i+1)])
+                if match_res:
+                    res.append((monster_type, monster_level, True))
+                else:
+                    res.append((monster_type, monster_level, False))
         return res
 
     def run(self, trigger_pos=None):
         
         if trigger_pos is not None:
+            first_rally_pos = (460, 460)
+            second_rally_pos = (460, 870)
+            rally_join_btns = [first_rally_pos, second_rally_pos]
             self._notify('[*] Checking Rallies...')
             self.driver.tap(trigger_pos[0], trigger_pos[1])
             time.sleep(0.5)
             analyze_rally_res = self.analyze_rally_info()
-            for i in analyze_rally_res:
-                if i[1] == 0: continue
-                self._notify(f'{i[0].value}, {i[1]}, {'Joinable' if i[2] else 'Full'}')
+            current_target = -1
+  
+            for i in range(len(analyze_rally_res)):
+                self._notify(f'Found {analyze_rally_res[i][0].value}, {analyze_rally_res[i][1]}, {'Joinable' if analyze_rally_res[i][2] else 'Full'}')
                 
+                if analyze_rally_res[i][0] is MonsterType.DE and analyze_rally_res[i][2]:
+                    for pref in self._rally_preference:
+                        if pref['name'] == 'DE' and pref['enabled']:
+                            if current_target != -1:
+                                if analyze_rally_res[current_target][0] is MonsterType.DE:
+                                    if analyze_rally_res[i][1] <= perf['level'] and analyze_rally_res[i][1] > analyze_rally_res[current_target][1]:
+                                        curren_target = i
+                            else:
+                                current_target = i
+                elif analyze_rally_res[i][0] is MonsterType.DW and analyze_rally_res[i][2]:
+                    for pref in self._rally_preference:
+                        if pref['name'] == 'DW' and pref['enabled']:
+                            if current_target != -1:
+                                if analyze_rally_res[current_target][0] is MonsterType.DW:
+                                    if analyze_rally_res[i][1] <= pref['level'] and analyze_rally_res[i][1] > analyze_rally_res[current_target][1]:
+                                        curren_target = i
+                                elif analyze_rally_res[current_target][0] is MonsterType.DE:
+                                    if analyze_rally_res[i][1] <= pref['level']:
+                                        curren_target = i
+                            else:
+                                current_target = i
+                elif analyze_rally_res[i][0] is MonsterType.ZB and analyze_rally_res[i][2]:
+                    for pref in self._rally_preference:
+                        if pref['name'] == 'ZB' and pref['enabled']:
+                            if current_target != -1:
+                                if analyze_rally_res[current_target][0] is MonsterType.ZB:
+                                    if analyze_rally_res[i][1] <= pref['level'] and analyze_rally_res[i][1] > analyze_rally_res[current_target][1]:
+                                        curren_target = i
+                                else:
+                                    if analyze_rally_res[i][1] <= pref['level']:
+                                        curren_target = i
+                            else:
+                                current_target = i
+            if current_target != -1:
+                self.driver.tap(rally_join_btns[current_target][0], rally_join_btns[current_target][1])
+                if self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=2):
+                    self._notify(f'Joining rally: {analyze_rally_res[current_target][0].value}, Lv.{analyze_rally_res[current_target][1]}')
+                    return analyze_rally_res[current_target]
+                else:
+                    return False
             self.wait_and_click(os.path.join(ASSETS_DIR, 'go_back_btn.png'), timeout=2)
-            return True
+            return False
         else:
             return False

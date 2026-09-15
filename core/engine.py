@@ -5,7 +5,7 @@ import threading
 import time
 from enum import Enum
 
-from config import ASSETS_DIR
+from config import ASSETS_DIR, ACCOUNTS
 from core.adb_driver import AdbDriver
 from core.cancel import TaskKilled, kill_event
 from core.logger import ActivityLogger
@@ -32,7 +32,7 @@ TASK_MAP = {
 
 # Tasks that participate in the automatic cycle and can be toggled on/off.
 # 'launch' is not included — it always runs at the top of every cycle.
-CYCLE_TASKS = frozenset({'help', 'dig', 'lucky_gift'})
+CYCLE_TASKS = frozenset({'help', 'dig', 'lucky_gift', 'rally'})
 
 # Priority-ordered trigger detection for the automatic cycle: task name →
 # notification template + match threshold (mirrors what each task uses).
@@ -106,6 +106,9 @@ class BotEngine:
         self._photo_notifier = None
         self._thread = None
         self.team_state = TeamState.IDLE
+        for acc in ACCOUNTS:
+            if user_id == acc['user_id']:
+                self._rally_preference = acc['rally_preference']
 
     # ---- remote control API ----
 
@@ -304,6 +307,13 @@ class BotEngine:
         finally:
             self.current_task = None
 
+    def _update_quad_state(self, screen):
+        pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'quad_leader.png'), scan_area=(2, 290, 350, 602))
+        if pos:
+            return
+        else:
+            self.team_state = TeamState.IDLE
+
     def _cycle_tasks(self):
         """One detection pass on a SINGLE screenshot (~0.7s each, so screenshots
         dominate idle time). The frame decides game launch, logout, which cycle
@@ -328,7 +338,7 @@ class BotEngine:
                 self.stop_event.set()
                 self._notify('⚠️ Logout detected — auto loop stopped. Send /start to resume.')
                 return
-
+            self._update_quad_state(screen)
             for name, asset, threshold, scan_area in CYCLE_DETECTORS:
                 if name not in self.enabled_tasks:
                     continue
@@ -338,7 +348,7 @@ class BotEngine:
                 if not pos:
                     continue
                 
-                task = TASK_MAP[name](self.driver)
+                task = TASK_MAP[name](self.driver) if name != 'rally' else TASK_MAP[name](self.driver, self._rally_preference)
                 task.set_notifier(self._notify)
                 if task.run(trigger_pos=pos):
                     if name == 'help':
