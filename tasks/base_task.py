@@ -30,31 +30,31 @@ class BaseTask:
         if kill_event.is_set():
             raise TaskKilled('task killed by user')
 
-    def wait_and_click(self, template_path: str, timeout: int = 10, interval: float = 0.8) -> bool:
+    def wait_and_click(self, template_path: str, timeout: int = 10, interval: float = 0.8, scan_area: Optional[Tuple[int, int, int, int]] = None) -> bool:
         start_time = time.time()
         while time.time() - start_time < timeout:
             self._raise_if_killed()
             screen = self.driver.screenshot()
             if screen is not None:
-                pos = self.matcher.find_template(screen, template_path)
+                pos = self.matcher.find_template(screen, template_path, scan_area=scan_area)
                 if pos:
                     self.driver.tap(pos[0], pos[1])
                     return True
             time.sleep(interval)
         return False
 
-    def check_exists(self, template_path: str, threshold: float = 0.82) -> Optional[Tuple[int, int]]:
+    def check_exists(self, template_path: str, threshold: float = 0.82, scan_area: Optional[Tuple[int, int, int, int]] = None) -> Optional[Tuple[int, int]]:
         self._raise_if_killed()
         screen = self.driver.screenshot()
         if screen is None:
             return None
-        return self.matcher.find_template(screen, template_path, threshold)
+        return self.matcher.find_template(screen, template_path, threshold, scan_area=scan_area)
 
-    def check_text_exists(self, target_text: str) -> bool:
+    def check_text_exists(self, target_text: str, scan_area: Optional[Tuple[int, int, int, int]] = None) -> bool:
         screen = self.driver.screenshot()
         if screen is None:
             return False
-        return self.ocr_engine.check_text_exists(screen, target_text)
+        return self.ocr_engine.check_text_exists(screen, target_text, scan_area=scan_area)
 
     def dismiss_popups(self, close_btn_template: str, max_attempts: int = 3):
         for _ in range(max_attempts):

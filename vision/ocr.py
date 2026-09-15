@@ -38,16 +38,18 @@ class OCREngine:
                     self._ocr = RapidOCR()
         return self._ocr
 
-    def extract_texts(self, image) -> List[str]:
+    def extract_texts(self, image, scan_area: Optional[Tuple[int, int, int, int]] = None) -> List[str]:
         """All recognized text fragments in the image (empty if none/None)."""
         if image is None:
             return []
+        if scan_area:
+            image = image[scan_area[1]:scan_area[3], scan_area[0]:scan_area[2]]
         result = self._engine()(image)
         return list(result.txts or [])
 
-    def check_text_exists(self, image, target_text: str) -> bool:
+    def check_text_exists(self, image, target_text: str, scan_area: Optional[Tuple[int, int, int, int]] = None) -> bool:
         """True if target_text appears (as a substring) on the screen."""
-        return any(target_text in text for text in self.extract_texts(image))
+        return any(target_text in text for text in self.extract_texts(image, scan_area=scan_area))
 
     def recognize_text(self, image_path: str) -> str:
         """OCR a file on disk; returns the joined text."""
@@ -56,14 +58,24 @@ class OCREngine:
             raise ValueError(f"Could not read the image at {image_path}")
         return ' '.join(self.extract_texts(image))
         
-    def get_text_position(self, image, target_text: str):
+    def get_text_position(self, image, target_text: str, scan_area: Optional[Tuple[int, int, int, int]] = None):
         """Returns the bounding box of the target_text if found, else None."""
         if image is None:
             return None
         result = self._engine()(image)
         for text, box in zip(result.txts or [], result.boxes or []):
             if target_text in text:
-                return box  # Return the bounding box of the first match
+                if scan_area:
+                    # Adjust the box coordinates based on the scan area
+                    adjusted_box = [
+                        box[0] + scan_area[0],
+                        box[1] + scan_area[1],
+                        box[2] + scan_area[0],
+                        box[3] + scan_area[1]
+                    ]
+                    return adjusted_box
+                else:
+                    return box  # Return the bounding box of the first match
         return None
 
 def measure_ocr_performance(image, iterations: int = 10) -> float:

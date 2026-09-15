@@ -24,6 +24,8 @@ def main():
         drv = AdbDriver(device_id=acc['device_id'])
         eng = BotEngine(drv, cycle_interval=1.0, user_id=uid,
                         enabled_tasks=acc.get('enabled_tasks'))
+        # load the ocr model once
+        eng.ocr_engine._engine()
         engines[uid] = eng
         drivers[uid] = drv
 

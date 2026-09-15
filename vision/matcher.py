@@ -7,18 +7,21 @@ import time
 
 class TemplateMatcher:
     @staticmethod
-    def find_template(screen: np.ndarray, template_path: str, threshold: float = 0.82) -> Optional[Tuple[int, int]]:
+    def find_template(screen: np.ndarray, template_path: str, threshold: float = 0.82, scan_area: Optional[Tuple[int, int, int, int]] = None) -> Optional[Tuple[int, int]]:
         template = cv2.imread(template_path)
         if template is None or screen is None:
             return None
+
+        if scan_area:
+            screen = screen[scan_area[1]:scan_area[3], scan_area[0]:scan_area[2]]
 
         res = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
 
         if max_val >= threshold:
             h, w = template.shape[:2]
-            center_x = max_loc[0] + w // 2
-            center_y = max_loc[1] + h // 2
+            center_x = max_loc[0] + w // 2 + (scan_area[0] if scan_area else 0)
+            center_y = max_loc[1] + h // 2 + (scan_area[1] if scan_area else 0)
             return center_x, center_y
         return None
 

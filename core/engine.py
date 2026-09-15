@@ -3,6 +3,7 @@ import os
 import queue
 import threading
 import time
+from enum import Enum
 
 from config import ASSETS_DIR
 from core.adb_driver import AdbDriver
@@ -14,7 +15,8 @@ from tasks.daily_tasks import (
     ExitStuckStateTask,
     GameLaunchTask,
     LuckyGiftTask,
-    SendChatFlowerTask
+    SendChatFlowerTask,
+    JoinRallyTask
 )
 from vision.matcher import TemplateMatcher
 from vision.ocr import OCREngine
@@ -24,13 +26,34 @@ TASK_MAP = {
     'dig': DigTask,
     'lucky_gift': LuckyGiftTask,
     'launch': GameLaunchTask,
-    'flower': SendChatFlowerTask
+    'flower': SendChatFlowerTask,
+    'rally': JoinRallyTask
 }
 
 # Tasks that participate in the automatic cycle and can be toggled on/off.
 # 'launch' is not included — it always runs at the top of every cycle.
 CYCLE_TASKS = frozenset({'help', 'dig', 'lucky_gift'})
 
+# Priority-ordered trigger detection for the automatic cycle: task name →
+# notification template + match threshold (mirrors what each task uses).
+# A single screenshot drives the decision; the first matching task acts and
+# the cycle ends so the next pass rescans a settled screen.
+CYCLE_DETECTORS = (
+    ('dig',        'extravacator_notification.png', 0.8, (600,1300,750,1480)),  # scan area for dig notification
+    ('lucky_gift', 'lucky_gift_notification.png',   0.82, (600,1300,750,1480)),  # scan area for lucky gift notification
+    ('rally',     'party_notification_btn.png',    0.8, (770, 966, 872, 1072)),
+    ('help',       'help_btn.png',                  0.82, (645,1060,960,1190)),  # scan area for help notification
+)
+
+class TeamState(Enum):
+    UNKNOWN = 0
+    DIGGING = 1
+    IDLE = 2
+    RALLYING = 3
+    MOVING = 4
+
+
+team_states = [TeamState.UNKNOWN for i in range(4)]
 
 class Stats:
     def __init__(self):
@@ -50,6 +73,11 @@ class Stats:
         print("                Stats Report               ")
         print("==========================================")
         print(self.format_stats())
+    
+    def reset(self):
+        self.alliance_help_count = 0
+        self.dig_count = 0
+        self.lucky_gift_count = 0
 
 
 class BotEngine:
@@ -72,10 +100,12 @@ class BotEngine:
         self.exit_event = threading.Event()   # set = process shutdown
         self.stop_event.set()                 # start in stopped state; /start to begin
         self.ocr_engine = OCREngine.shared()
+        self.matcher = TemplateMatcher()
         self.current_task = None
         self._notifier = None
         self._photo_notifier = None
         self._thread = None
+        self.team_state = TeamState.IDLE
 
     # ---- remote control API ----
 
@@ -180,6 +210,9 @@ class BotEngine:
         kill_event.set()
         self._notify('🗡️ Kill signal sent — the task will abort at its next screen check.')
 
+    def reset_stats(self):
+        self.stats.reset()
+        # self._notify('ℹ️ Stats reset.')
     # ---- internals ----
 
     def _notify(self, text: str):
@@ -272,54 +305,64 @@ class BotEngine:
             self.current_task = None
 
     def _cycle_tasks(self):
-        launch_task = GameLaunchTask(self.driver)
-        if launch_task.run() and launch_task.just_launched:
-            self._record_task('launch', launch_task)
-            self._sleep(20)
-            if self.stop_event.is_set() or self.pause_event.is_set():
+        """One detection pass on a SINGLE screenshot (~0.7s each, so screenshots
+        dominate idle time). The frame decides game launch, logout, which cycle
+        task triggers, and the stuck check. The first matching task acts and the
+        cycle ends, so the next pass rescans a settled screen (tasks re-screenshot
+        internally while they navigate)."""
+        kill_event.clear()
+        screen = self.driver.screenshot()
+        if screen is not None:
+            launch_task = GameLaunchTask(self.driver)
+            if launch_task.run(screen=screen) and launch_task.just_launched:
+                self._record_task('launch', launch_task)
+                self._sleep(20)
+                return
+            # Game not in the foreground and the icon wasn't found: fall
+            # through — nothing below matches a home screen and the stuck
+            # check stops the loop, same as before.
+
+            if self._detect_logout(screen):
+                self.stats.print_stats()
+                self.driver.tap(450, 900)
+                self.stop_event.set()
+                self._notify('⚠️ Logout detected — auto loop stopped. Send /start to resume.')
                 return
 
-        if 'help' in self.enabled_tasks:
-            help_task = AllianceHelpTask(self.driver)
-            if help_task.run():
-                self.stats.alliance_help_count += 1
-                self._record_task('help', help_task)
-
-        if 'dig' in self.enabled_tasks:
-            dig_task = DigTask(self.driver)
-            dig_task.set_notifier(self._notify)
-            if dig_task.run():
-                self.stats.dig_count += 1
-                self._record_task('dig', dig_task)
-                self._notify_capture('dig', dig_task)
-
-        if 'lucky_gift' in self.enabled_tasks:
-            lucky_gift_task = LuckyGiftTask(self.driver)
-            lucky_gift_task.set_notifier(self._notify)
-            if lucky_gift_task.run():
-                self.stats.lucky_gift_count += 1
-                self._record_task('lucky_gift', lucky_gift_task)
-                self._notify_capture('lucky_gift', lucky_gift_task)
-        if self._detect_logout():
-            self.stats.print_stats()
-            self.driver.tap(450, 900)
-            self.stop_event.set()
-            self._notify('⚠️ Logout detected — auto loop stopped. Send /start to resume.')
-            return
+            for name, asset, threshold, scan_area in CYCLE_DETECTORS:
+                if name not in self.enabled_tasks:
+                    continue
+                if name == 'rally' and self.team_state is not TeamState.IDLE:
+                    continue
+                pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, asset), threshold, scan_area=scan_area)
+                if not pos:
+                    continue
+                
+                task = TASK_MAP[name](self.driver)
+                task.set_notifier(self._notify)
+                if task.run(trigger_pos=pos):
+                    if name == 'help':
+                        self.stats.alliance_help_count += 1
+                    elif name == 'dig':
+                        self.stats.dig_count += 1
+                    elif name == 'lucky_gift':
+                        self.stats.lucky_gift_count += 1
+                    elif name == 'rally':
+                        self.team_state = TeamState.RALLYING
+                    self._record_task(name, task)
+                    self._notify_capture(name, task)
+                return  # one action per cycle; next cycle rescans
 
         exit_stuck_task = ExitStuckStateTask(self.driver)
-        if not exit_stuck_task.run():
-        
+        if not exit_stuck_task.run(screen=screen):
             self.stats.print_stats()
             self.stop_event.set()
             self._notify('⚠️ Stuck state detected and recovery failed — auto loop stopped. Send /start to resume.')
 
-    def _detect_logout(self) -> bool:
-        img = self.driver.screenshot()
-        if img is None:
+    def _detect_logout(self, screen) -> bool:
+        if screen is None:
             return False
-        matcher = TemplateMatcher()
-        pos = matcher.find_template(img, os.path.join(ASSETS_DIR, 'logout_notification.png'))
+        pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'logout_notification.png'))
         if pos:
             print('Detected logout state...')
             return True

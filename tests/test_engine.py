@@ -10,9 +10,11 @@ import threading
 import time
 import unittest
 
+import cv2
 import numpy as np
 
 import core.engine as engine_mod
+from config import ASSETS_DIR
 from core.cancel import TaskKilled, kill_event
 from core.engine import BotEngine
 from core.logger import ActivityLogger
@@ -62,7 +64,7 @@ class FakeResultTask:
     def set_notifier(self, fn):
         self._notifier = fn
 
-    def run(self):
+    def run(self, *args, **kwargs):
         return self.result
 
 
@@ -176,7 +178,7 @@ class StuckEngine(BotEngine):
         super().__init__(driver, cycle_interval=0.2, logger=logger)
         self._logout = logout
 
-    def _detect_logout(self):
+    def _detect_logout(self, screen):
         return self._logout
 
 
@@ -275,6 +277,94 @@ class TestFullDryRun(EngineTestCase):
         # A /start resumes the cycle after the stop.
         e.start_loop()
         self.assertEqual(e.status, 'RUNNING')
+
+
+class CanvasDriver:
+    """FakeDriver variant returning a fixed game canvas; counts screenshots.
+
+    Canvas shape (1600, 900, 3) = "game running" per GameLaunchTask's check."""
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+        self.taps = []
+        self.screenshots = 0
+
+    def screenshot(self):
+        self.screenshots += 1
+        return self.canvas
+
+    def tap(self, x, y, **kwargs):
+        self.taps.append((x, y))
+
+    def swipe(self, *args, **kwargs):
+        pass
+
+    def press_back(self):
+        pass
+
+
+def paste_template(canvas, asset_name, x, y):
+    """Paste a real template asset onto the canvas and return it.
+
+    Default cv2.imread (3-channel) matches how TemplateMatcher reads templates."""
+    img = cv2.imread(os.path.join(ASSETS_DIR, asset_name))
+    h, w = img.shape[:2]
+    canvas[y:y + h, x:x + w] = img
+    return img
+
+
+class TestSingleScreenshotCycle(unittest.TestCase):
+    """One cycle = one screenshot: launch check, logout check, trigger
+    detection, the action itself and the stuck check all share a single frame
+    (see BotEngine._cycle_tasks)."""
+
+    def setUp(self):
+        kill_event.clear()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.logger = ActivityLogger(os.path.join(self._tmp.name, 'activity.db'))
+
+    def tearDown(self):
+        kill_event.clear()
+        self.logger.close()
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _blank_canvas():
+        return np.zeros((1600, 900, 3), dtype=np.uint8)
+
+    def _engine(self, driver):
+        e = BotEngine(driver, cycle_interval=1.0, logger=self.logger)
+        e.set_notifier(lambda text: None)
+        e.stop_event.clear()  # engines start in STOPPED state
+        return e
+
+    def test_idle_canvas_uses_one_screenshot(self):
+        driver = CanvasDriver(self._blank_canvas())
+        e = self._engine(driver)
+        e._cycle_tasks()
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [])
+        self.assertTrue(e.stop_event.is_set())  # stuck stop on a blank frame
+
+    def test_help_trigger_taps_with_one_screenshot(self):
+        driver = CanvasDriver(self._blank_canvas())
+        img = paste_template(driver.canvas, 'help_btn.png', 400, 300)
+        e = self._engine(driver)
+        e._cycle_tasks()
+        self.assertEqual(driver.screenshots, 1)
+        self.assertEqual(driver.taps, [(400 + img.shape[1] // 2, 300 + img.shape[0] // 2)])
+        self.assertEqual(e.stats.alliance_help_count, 1)
+        self.assertFalse(e.stop_event.is_set())  # no stuck re-check after an action
+
+    def test_help_has_priority_over_dig(self):
+        driver = CanvasDriver(self._blank_canvas())
+        img = paste_template(driver.canvas, 'help_btn.png', 400, 300)
+        paste_template(driver.canvas, 'extravacator_notification.png', 700, 300)
+        e = self._engine(driver)
+        e._cycle_tasks()
+        self.assertEqual(driver.taps, [(400 + img.shape[1] // 2, 300 + img.shape[0] // 2)])
+        self.assertEqual(e.stats.alliance_help_count, 1)
+        self.assertEqual(e.stats.dig_count, 0)
 
 
 class TestActivityRecording(EngineTestCase):

@@ -4,9 +4,20 @@ import time
 from tasks.base_task import BaseTask
 from config import ASSETS_DIR
 from core.logger import save_capture
+from enum import Enum
+
+class MonsterType(Enum):
+    DE = 'Doom Elite'
+    DW = 'Doom Walker'
+    ZB = 'Zoombie'
+    UN = 'UNKNOWN'
 
 class AllianceHelpTask(BaseTask):
-    def run(self):
+    def run(self, trigger_pos=None):
+        self._raise_if_killed()
+        if trigger_pos is not None:
+            self.driver.tap(trigger_pos[0], trigger_pos[1])
+            return True
         # print("[*] Starting: Help alliance...")
         btn_help = os.path.join(ASSETS_DIR, 'help_btn.png')
         res = self.wait_and_click(btn_help, 0.1)
@@ -57,9 +68,10 @@ class ExitStuckStateTask(BaseTask):
     matched against the same frame and taps happen directly from it. Fresh
     screenshots are only taken when the screen changes (shop exit wait)."""
 
-    def run(self):
+    def run(self, screen=None):
         self._raise_if_killed()
-        screen = self.driver.screenshot()
+        if screen is None:
+            screen = self.driver.screenshot()
         if screen is None:
             return False
 
@@ -99,8 +111,8 @@ class GameLaunchTask(BaseTask):
         super().__init__(driver)
         self.just_launched = False
 
-    def run(self):
-        img = self.driver.screenshot()
+    def run(self, screen=None):
+        img = screen if screen is not None else self.driver.screenshot()
         if img is None:
             print('[-] Screenshot failed during game launch check')
             return False
@@ -126,9 +138,10 @@ class DigTask(BaseTask):
         super().__init__(driver)
         self.last_capture_id = None
 
-    def run(self):
+    def run(self, trigger_pos=None):
+        self._raise_if_killed()
         icon_dig = os.path.join(ASSETS_DIR, 'extravacator_notification.png')
-        pos = self.check_exists(icon_dig, threshold=0.8)
+        pos = trigger_pos if trigger_pos is not None else self.check_exists(icon_dig, threshold=0.8)
         if pos:
             self._notify("[*] Starting: Digging Task...")
 
@@ -181,9 +194,11 @@ class DigTask(BaseTask):
                 # Wait for the dig action to complete
                 cnt = 1
                 gift_collected = True
-                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.7)):
+                gift_scan_area = (370,620,510,770)
+                gift_name_scan_area = (320,800,660,870)
+                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.7, scan_area=gift_scan_area)):
                     # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
-                    if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png')) or (not self.check_text_exists("挖掘點") and not self.check_text_exists("實驗無人機")))):
+                    if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png'), scan_area=gift_scan_area) or (not self.check_text_exists("挖掘點", scan_area=gift_name_scan_area) and not self.check_text_exists("實驗無人機", scan_area=gift_name_scan_area)))):
                         gift_collected = False
                         break
                     cnt += 1
@@ -219,9 +234,14 @@ class LuckyGiftTask(BaseTask):
         super().__init__(driver)
         self.last_capture_id = None
 
-    def run(self):
+    def run(self, trigger_pos=None):
+        self._raise_if_killed()
         # print("[*] Starting: Help alliance...")
-        lucky_gift_notification_res = self.wait_and_click(os.path.join(ASSETS_DIR, 'lucky_gift_notification.png'), 0.1)
+        if trigger_pos is not None:
+            self.driver.tap(trigger_pos[0], trigger_pos[1])
+            lucky_gift_notification_res = True
+        else:
+            lucky_gift_notification_res = self.wait_and_click(os.path.join(ASSETS_DIR, 'lucky_gift_notification.png'), 0.1)
         if lucky_gift_notification_res:
             self._notify('[*] Started collecting Lucky gift')
             shared_click_res = self.wait_and_click(os.path.join(ASSETS_DIR, 'lucky_gift_share_frame.png'), timeout=5)
@@ -238,24 +258,48 @@ class LuckyGiftTask(BaseTask):
                     return True
         return False
 
-class JoinDETask(BaseTask):
-    """Join the DE alliance if not already a member."""
-    def run(self):
-        print("[*] Starting: Join DE Alliance Task...")
-        btn_alliance = os.path.join(ASSETS_DIR, 'rally_available_notification.png')
-        btn_join_de = os.path.join(ASSETS_DIR, 'btn_join_de.png')
+class JoinRallyTask(BaseTask):
+    def analyze_rally_info(self):
+        frames = [30, 225, 862, 615, 36, 644, 860, 1025]
+        screen = self.driver.screenshot()
+        # get the info of the first rally
+        res = []
+        for i in range(2):
+            #['攻擊', '[DGET]东方虎3', '集結中...', '00:00:59', 'Lv.26', '末日精英', '單位/上限[1/5]', '距離12公里']
+            ocr_res = self.ocr_engine.extract_texts(screen, frames[4*i:4*(i+1)])
+            
+            monster_type = MonsterType.UN
+            monster_level = 0
+            
+            for txt in ocr_res:
+                if '末日精英' in txt:
+                    monster_type = MonsterType.DE
+                elif '末日遊蕩者' in txt:
+                    monster_type = MonsterType.DW
+                elif '喪屍首領' in txt:
+                    monster_type = MonsterType.ZB
+            for txt in ocr_res:
+                if 'Lv' in txt:
+                    monster_level = int(txt[3:])
+            match_res = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'join_party_btn.png'), scan_area=frames[4*i:4*(i+1)])
+            if match_res:
+                res.append((monster_type, monster_level, True))
+            else:
+                res.append((monster_type, monster_level, False))
+        return res
 
-        # 1. Locate alliance button
-        if not self.wait_and_click(btn_alliance, timeout=5):
-            print("[-] Alliance button not found, skipping task.")
+    def run(self, trigger_pos=None):
+        
+        if trigger_pos is not None:
+            self._notify('[*] Checking Rallies...')
+            self.driver.tap(trigger_pos[0], trigger_pos[1])
+            time.sleep(0.5)
+            analyze_rally_res = self.analyze_rally_info()
+            for i in analyze_rally_res:
+                if i[1] == 0: continue
+                self._notify(f'{i[0].value}, {i[1]}, {'Joinable' if i[2] else 'Full'}')
+                
+            self.wait_and_click(os.path.join(ASSETS_DIR, 'go_back_btn.png'), timeout=2)
+            return True
+        else:
             return False
-
-        # 2. Join DE alliance
-        if not self.wait_and_click(btn_join_de, timeout=5):
-            print("[-] Join DE button not found or already a member.")
-            self.driver.press_back()
-            return False
-
-        print("[+] Successfully joined DE alliance.")
-        self.driver.press_back()
-        return True

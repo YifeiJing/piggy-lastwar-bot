@@ -55,3 +55,36 @@ class AdbDriver:
     def press_back(self):
         self.shell("input keyevent 4")
         time.sleep(0.5)
+
+def get_driver_performance(driver):
+    # screenshot performance test
+    total_screenshot_time = 0
+    iterations = 10
+    for i in range(iterations):
+        start_time = time.perf_counter()
+        screen = driver.screenshot()
+        if screen is None:
+            print("[-] Screenshot failed during performance test.")
+            return None
+        end_time = time.perf_counter()
+        total_screenshot_time += (end_time - start_time)
+    avg_screenshot_time = total_screenshot_time / iterations
+    total_tap_time = 0
+    for i in range(iterations):
+        start_time = time.perf_counter()
+        driver.tap(450, 800)  # Tap at a fixed position for testing
+        end_time = time.perf_counter()
+        total_tap_time += (end_time - start_time)
+    avg_tap_time = total_tap_time / iterations
+    total_swipe_time = 0
+    for i in range(iterations):
+        start_time = time.perf_counter()
+        driver.swipe(450, 800, 450, 800, 50)  # Swipe up for testing
+        end_time = time.perf_counter()
+        total_swipe_time += (end_time - start_time)
+    avg_swipe_time = total_swipe_time / iterations
+    return {
+        'avg_screenshot_time': avg_screenshot_time,
+        'avg_tap_time': avg_tap_time,
+        'avg_swipe_time': avg_swipe_time
+    }

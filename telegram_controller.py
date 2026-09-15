@@ -232,6 +232,7 @@ class TelegramController:
             '/tap <x> <y> — tap the screen\n'
             '/swipe <x1> <y1> <x2> <y2> [ms] — swipe\n'
             '/back — Android back button\n'
+            '/resetstats — reset counters\n'
             + user_cmds +
             '/help — this text'
         )
@@ -405,6 +406,9 @@ class TelegramController:
         elif cmd == '/back':
             driver.press_back()
             await msg.reply_text('✅ Back pressed')
+        elif cmd == '/resetstats':
+            engine.reset_stats()
+            await msg.reply_text('✅ Stats reset')
         else:
             await msg.reply_text(f'❓ Unknown command.\n{self.help_text(chat_id)}')
 

@@ -7,7 +7,7 @@ import numpy as np
 
 import tasks.daily_tasks as dt_mod
 from core.cancel import TaskKilled, kill_event
-from tasks.daily_tasks import ExitStuckStateTask, GameLaunchTask, LuckyGiftTask, SendChatFlowerTask
+from tasks.daily_tasks import AllianceHelpTask, ExitStuckStateTask, GameLaunchTask, LuckyGiftTask, SendChatFlowerTask
 
 
 class FakeDriver:
@@ -238,6 +238,59 @@ class TestGameLaunchTask(unittest.TestCase):
         task = GameLaunchTask(driver)
         self.assertFalse(task.run())
         self.assertFalse(task.just_launched)
+
+
+class TestPreDetectedInputs(unittest.TestCase):
+    """Cycle pre-detection paths: run() reuses the frame/position the engine
+    already found instead of taking its own screenshot."""
+
+    def setUp(self):
+        kill_event.clear()
+
+    def tearDown(self):
+        kill_event.clear()
+
+    def test_help_trigger_taps_without_screenshot(self):
+        driver = FakeDriver()
+        task = AllianceHelpTask(driver)
+        self.assertTrue(task.run(trigger_pos=(111, 222)))
+        self.assertEqual(driver.taps, [(111, 222)])
+        self.assertEqual(driver.screenshots, 0)
+
+    def test_exit_stuck_reuses_given_frame(self):
+        driver = FakeDriver()
+        task = ExitStuckStateTask(driver)
+        task.matcher = FakeMatcherByTemplate({'base_btn.png': (100, 100)})
+        frame = np.zeros((90, 160, 3), dtype=np.uint8)
+        self.assertTrue(task.run(screen=frame))
+        self.assertEqual(driver.screenshots, 0)
+        self.assertEqual(driver.taps, [])
+
+    def test_game_launch_reuses_given_frame(self):
+        driver = FakeDriver()
+        task = GameLaunchTask(driver)
+        self.assertTrue(task.run(screen=np.zeros((1600, 900, 3), dtype=np.uint8)))
+        self.assertFalse(task.just_launched)
+        self.assertEqual(driver.screenshots, 0)
+
+    def test_lucky_gift_trigger_taps_then_follows_script(self):
+        driver = FakeDriver()
+        self._orig_save_capture = dt_mod.save_capture
+        dt_mod.save_capture = lambda img, prefix='dig', capture_dir=None: 'fake_capture.jpg'
+        try:
+            task = ScriptedLuckyGiftTask(driver, [
+                ('lucky_gift_share_frame.png', True),
+                ('gift_open_btn.png', True),
+                ('like_btn.png', True),
+                ('lucky_gift_list_exit.jpg', True),
+                ('go_back_btn.png', True),
+            ])
+            self.assertTrue(task.run(trigger_pos=(10, 10)))
+        finally:
+            dt_mod.save_capture = self._orig_save_capture
+        self.assertEqual(driver.taps[0], (10, 10))  # notification tap, no screenshot first
+        self.assertEqual(task._script, [])  # whole flow consumed
+        self.assertEqual(task.last_capture_id, 'fake_capture.jpg')
 
 
 class ScriptedFlowerTask(SendChatFlowerTask):
