@@ -372,11 +372,11 @@ class BotEngine:
             # through — the stuck check on this frame stops the loop, same
             # as before.
 
-        exit_stuck_task = ExitStuckStateTask(self.driver)
-        if not exit_stuck_task.run(screen=screen):
-            self.stats.print_stats()
-            self.stop_event.set()
-            self._notify('⚠️ Stuck state detected and recovery failed — auto loop stopped. Send /start to resume.')
+            exit_stuck_task = ExitStuckStateTask(self.driver)
+            if not exit_stuck_task.run(screen=screen):
+                self.stats.print_stats()
+                self.stop_event.set()
+                self._notify('⚠️ Stuck state detected and recovery failed — auto loop stopped. Send /start to resume.')
 
     def _detect_logout(self, screen) -> bool:
         if screen is None:

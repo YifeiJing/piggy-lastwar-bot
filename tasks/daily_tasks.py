@@ -353,19 +353,19 @@ class JoinRallyTask(BaseTask):
                                 current_target = i
         if current_target != -1:
             self.driver.tap(rally_join_btns[current_target][0], rally_join_btns[current_target][1])
-            screen_tap_join = self.driver.screenshot()
-            if self.ocr_engine.check_text_exists(screen_tap_join, '名片', (200, 0, 350, 100)):
-                # the rally is full before able to join, need to exit here
-                self.driver.tap(850, 25)
-                time.sleep(0.3)
-                self.driver.tap(50, 1500)
-                return False
+            
             if self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=5):
                 monster = analyze_rally_res[current_target]
                 self.last_join_info = f'{monster[0].value} Lv.{monster[1]}'
                 self._notify(f'Joining rally: {monster[0].value}, Lv.{monster[1]}')
                 return monster
             else:
+                screen_tap_join = self.driver.screenshot()
+                if self.ocr_engine.check_text_exists(screen_tap_join, '名片', (200, 0, 350, 100)):
+                    # the rally is full before able to join, need to exit here
+                    self.driver.tap(850, 25)
+                    time.sleep(0.3)
+                    self.driver.tap(50, 1500)
                 return False
         self.wait_and_click(os.path.join(ASSETS_DIR, 'go_back_btn.png'), timeout=2)
         return False
