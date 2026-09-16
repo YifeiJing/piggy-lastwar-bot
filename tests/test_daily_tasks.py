@@ -118,7 +118,7 @@ class FakeMatcherByTemplate:
         self.positions = positions  # basename -> (x, y) or None
         self.searches = []
 
-    def find_template(self, screen, template_path, threshold=0.82):
+    def find_template(self, screen, template_path, threshold=0.82, scan_area=None):
         name = os.path.basename(template_path)
         self.searches.append(name)
         return self.positions.get(name)

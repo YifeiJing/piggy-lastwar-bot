@@ -66,7 +66,7 @@ class FakeSharedOCR:
     def __init__(self):
         self.checked = []
 
-    def check_text_exists(self, image, target_text):
+    def check_text_exists(self, image, target_text, scan_area=None):
         self.checked.append(target_text)
         return target_text == 'gift'
 

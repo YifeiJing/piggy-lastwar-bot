@@ -106,9 +106,10 @@ class BotEngine:
         self._photo_notifier = None
         self._thread = None
         self.team_state = TeamState.IDLE
+        self._rally_preference = []
         for acc in ACCOUNTS:
             if user_id == acc['user_id']:
-                self._rally_preference = acc['rally_preference']
+                self._rally_preference = acc.get('rally_preference', [])
 
     # ---- remote control API ----
 
@@ -257,7 +258,10 @@ class BotEngine:
 
     def _run_task_once(self, name: str):
         kill_event.clear()
-        task = TASK_MAP[name](self.driver)
+        if name == 'rally':
+            task = TASK_MAP[name](self.driver, self._rally_preference)
+        else:
+            task = TASK_MAP[name](self.driver)
         self.current_task = name
         self._notify(f"▶️ Starting task: {name}")
         try:
@@ -281,6 +285,8 @@ class BotEngine:
             self.logger.log_dig(getattr(task, 'last_capture_id', None))
         elif name == 'lucky_gift':
             self.logger.log_lucky_gift(getattr(task, 'last_capture_id', None))
+        elif name == 'rally':
+            self.logger.log_rally(getattr(task, 'last_join_info', None))
         elif name == 'launch':
             # Only record when the game was actually started, not every
             # cycle's "already running" check.
@@ -310,7 +316,7 @@ class BotEngine:
     def _update_quad_state(self, screen):
         pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'quad_leader.png'), scan_area=(2, 290, 350, 602))
         if pos:
-            return
+            self.team_state = TeamState.RALLYING
         else:
             self.team_state = TeamState.IDLE
 
@@ -324,44 +330,47 @@ class BotEngine:
         screen = self.driver.screenshot()
         if screen is not None:
             launch_task = GameLaunchTask(self.driver)
-            if launch_task.run(screen=screen) and launch_task.just_launched:
-                self._record_task('launch', launch_task)
-                self._sleep(20)
-                return
-            # Game not in the foreground and the icon wasn't found: fall
-            # through — nothing below matches a home screen and the stuck
-            # check stops the loop, same as before.
+            if launch_task.run(screen=screen):
+                if launch_task.just_launched:
+                    self._record_task('launch', launch_task)
+                    self._sleep(20)
+                    return
+                # Game is in the foreground — the frame can carry dialogs and
+                # task triggers. (Scan areas assume the game screen's
+                # resolution, so detection only runs here.)
+                if self._detect_logout(screen):
+                    self.stats.print_stats()
+                    self.driver.tap(450, 900)
+                    self.stop_event.set()
+                    self._notify('⚠️ Logout detected — auto loop stopped. Send /start to resume.')
+                    return
+                self._update_quad_state(screen)
+                for name, asset, threshold, scan_area in CYCLE_DETECTORS:
+                    if name not in self.enabled_tasks:
+                        continue
+                    if name == 'rally' and self.team_state is not TeamState.IDLE:
+                        continue
+                    pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, asset), threshold, scan_area=scan_area)
+                    if not pos:
+                        continue
 
-            if self._detect_logout(screen):
-                self.stats.print_stats()
-                self.driver.tap(450, 900)
-                self.stop_event.set()
-                self._notify('⚠️ Logout detected — auto loop stopped. Send /start to resume.')
-                return
-            self._update_quad_state(screen)
-            for name, asset, threshold, scan_area in CYCLE_DETECTORS:
-                if name not in self.enabled_tasks:
-                    continue
-                if name == 'rally' and self.team_state is not TeamState.IDLE:
-                    continue
-                pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, asset), threshold, scan_area=scan_area)
-                if not pos:
-                    continue
-                
-                task = TASK_MAP[name](self.driver) if name != 'rally' else TASK_MAP[name](self.driver, self._rally_preference)
-                task.set_notifier(self._notify)
-                if task.run(trigger_pos=pos):
-                    if name == 'help':
-                        self.stats.alliance_help_count += 1
-                    elif name == 'dig':
-                        self.stats.dig_count += 1
-                    elif name == 'lucky_gift':
-                        self.stats.lucky_gift_count += 1
-                    elif name == 'rally':
-                        self.team_state = TeamState.RALLYING
-                    self._record_task(name, task)
-                    self._notify_capture(name, task)
-                return  # one action per cycle; next cycle rescans
+                    task = TASK_MAP[name](self.driver) if name != 'rally' else TASK_MAP[name](self.driver, self._rally_preference)
+                    task.set_notifier(self._notify)
+                    if task.run(trigger_pos=pos):
+                        if name == 'help':
+                            self.stats.alliance_help_count += 1
+                        elif name == 'dig':
+                            self.stats.dig_count += 1
+                        elif name == 'lucky_gift':
+                            self.stats.lucky_gift_count += 1
+                        elif name == 'rally':
+                            self.team_state = TeamState.RALLYING
+                        self._record_task(name, task)
+                        self._notify_capture(name, task)
+                    return  # one action per cycle; next cycle rescans
+            # Game not in the foreground and the icon wasn't found: fall
+            # through — the stuck check on this frame stops the loop, same
+            # as before.
 
         exit_stuck_task = ExitStuckStateTask(self.driver)
         if not exit_stuck_task.run(screen=screen):

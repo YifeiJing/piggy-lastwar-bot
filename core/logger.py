@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS activity (
     time TEXT NOT NULL,
     user_id TEXT NOT NULL DEFAULT '',
     event TEXT NOT NULL,
-    capture TEXT
+    capture TEXT,
+    info TEXT
 )
 """
 
@@ -52,6 +53,12 @@ class ActivityLogger:
                 self._conn.commit()
             except sqlite3.OperationalError:
                 pass  # column already exists
+            # Add info column (free-text task detail, e.g. joined rally).
+            try:
+                self._conn.execute("ALTER TABLE activity ADD COLUMN info TEXT")
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     def log_help(self):
         self._insert('help', None)
@@ -65,11 +72,14 @@ class ActivityLogger:
     def log_launch(self):
         self._insert('launch', None)
 
-    def _insert(self, event: str, capture: Optional[str]):
+    def log_rally(self, info: Optional[str] = None):
+        self._insert('rally', None, info)
+
+    def _insert(self, event: str, capture: Optional[str], info: Optional[str] = None):
         with self._lock:
             self._conn.execute(
-                'INSERT INTO activity (time, user_id, event, capture) VALUES (?, ?, ?, ?)',
-                (time.strftime('%Y-%m-%d %H:%M:%S'), self.user_id, event, capture),
+                'INSERT INTO activity (time, user_id, event, capture, info) VALUES (?, ?, ?, ?, ?)',
+                (time.strftime('%Y-%m-%d %H:%M:%S'), self.user_id, event, capture, info),
             )
             self._conn.commit()
 

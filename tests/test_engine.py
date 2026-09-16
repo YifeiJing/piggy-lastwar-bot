@@ -21,17 +21,21 @@ from core.logger import ActivityLogger
 
 
 class FakeDriver:
-    """Mimics AdbDriver without adb: random-noise fake screen, records inputs."""
+    """Mimics AdbDriver without adb: random-noise fake screen, records inputs.
 
-    def __init__(self):
+    Default shape (900, 1600, 3) is a "home screen"; pass (1600, 900, 3) for
+    a game screen (GameLaunchTask's "game running" check)."""
+
+    def __init__(self, screen_shape=(900, 1600, 3)):
         self._rng = np.random.RandomState(42)
+        self._shape = screen_shape
         self.taps = []
         self.screenshots = 0
         self.backs = 0
 
     def screenshot(self):
         self.screenshots += 1
-        return self._rng.randint(0, 256, (900, 1600, 3), dtype=np.uint8)
+        return self._rng.randint(0, 256, self._shape, dtype=np.uint8)
 
     def tap(self, x, y, **kwargs):
         self.taps.append((x, y))
@@ -92,7 +96,7 @@ class EngineTestCase(unittest.TestCase):
         self.engine.set_notifier(self.messages.append)
         self._orig_tasks = {
             name: getattr(engine_mod, name)
-            for name in ('AllianceHelpTask', 'DigTask', 'ExitStuckStateTask', 'LuckyGiftTask', 'GameLaunchTask')
+            for name in ('AllianceHelpTask', 'DigTask', 'ExitStuckStateTask', 'LuckyGiftTask', 'GameLaunchTask', 'JoinRallyTask')
         }
 
     def make_engine(self):
@@ -108,6 +112,7 @@ class EngineTestCase(unittest.TestCase):
         engine_mod.TASK_MAP['dig'] = self._orig_tasks['DigTask']
         engine_mod.TASK_MAP['lucky_gift'] = self._orig_tasks['LuckyGiftTask']
         engine_mod.TASK_MAP['launch'] = self._orig_tasks['GameLaunchTask']
+        engine_mod.TASK_MAP['rally'] = self._orig_tasks['JoinRallyTask']
         kill_event.clear()
         self.logger.close()
         self._tmp.cleanup()
@@ -159,7 +164,7 @@ class TestStateMachine(EngineTestCase):
             lambda: any("✅ Task 'help' succeeded." == m for m in self.messages), timeout=5))
 
         e.run_task('nope')
-        self.assertIn("❓ Unknown task 'nope'. Available: help, dig, lucky_gift, launch, flower", self.messages)
+        self.assertIn("❓ Unknown task 'nope'. Available: help, dig, lucky_gift, launch, flower, rally", self.messages)
 
     def test_run_task_reports_failure(self):
         e = self.engine
@@ -205,7 +210,10 @@ class TestLoopRecovery(EngineTestCase):
         self.assertTrue(e._thread.is_alive())
 
     def test_logout_detection_stops_loop_and_notifies(self):
-        e = StuckEngine(self.driver, logout=True, logger=self.logger)
+        # Logout detection runs on game screens only, so use a game-shaped
+        # driver (home-screen frames skip detection and stop via stuck check).
+        game_driver = FakeDriver(screen_shape=(1600, 900, 3))
+        e = StuckEngine(game_driver, logout=True, logger=self.logger)
         e.set_notifier(self.messages.append)
         self.engine = e
         self._patch_tasks()
@@ -214,7 +222,7 @@ class TestLoopRecovery(EngineTestCase):
 
         self.assertTrue(wait_for(e.stop_event.is_set, timeout=10))
         self.assertIn('⚠️ Logout detected — auto loop stopped. Send /start to resume.', self.messages)
-        self.assertEqual(self.driver.taps, [(450, 900)])
+        self.assertEqual(game_driver.taps, [(450, 900)])
         self.assertEqual(e.status, 'STOPPED')
 
 
@@ -347,24 +355,89 @@ class TestSingleScreenshotCycle(unittest.TestCase):
         self.assertTrue(e.stop_event.is_set())  # stuck stop on a blank frame
 
     def test_help_trigger_taps_with_one_screenshot(self):
+        # Paste inside the help detector's scan area (645, 1060, 960, 1190).
         driver = CanvasDriver(self._blank_canvas())
-        img = paste_template(driver.canvas, 'help_btn.png', 400, 300)
+        img = paste_template(driver.canvas, 'help_btn.png', 645, 1060)
         e = self._engine(driver)
         e._cycle_tasks()
         self.assertEqual(driver.screenshots, 1)
-        self.assertEqual(driver.taps, [(400 + img.shape[1] // 2, 300 + img.shape[0] // 2)])
+        self.assertEqual(driver.taps, [(645 + img.shape[1] // 2, 1060 + img.shape[0] // 2)])
         self.assertEqual(e.stats.alliance_help_count, 1)
         self.assertFalse(e.stop_event.is_set())  # no stuck re-check after an action
 
-    def test_help_has_priority_over_dig(self):
+    def test_first_detector_wins(self):
+        # CYCLE_DETECTORS order is dig > lucky_gift > rally > help: with both
+        # triggers on screen, dig acts and the rest wait for the next cycle.
         driver = CanvasDriver(self._blank_canvas())
-        img = paste_template(driver.canvas, 'help_btn.png', 400, 300)
-        paste_template(driver.canvas, 'extravacator_notification.png', 700, 300)
-        e = self._engine(driver)
-        e._cycle_tasks()
-        self.assertEqual(driver.taps, [(400 + img.shape[1] // 2, 300 + img.shape[0] // 2)])
-        self.assertEqual(e.stats.alliance_help_count, 1)
-        self.assertEqual(e.stats.dig_count, 0)
+        paste_template(driver.canvas, 'extravacator_notification.png', 600, 1300)
+        paste_template(driver.canvas, 'help_btn.png', 645, 1060)
+        orig_dig = engine_mod.TASK_MAP['dig']
+        engine_mod.TASK_MAP['dig'] = make_task_class(True)
+        try:
+            e = self._engine(driver)
+            e._cycle_tasks()
+        finally:
+            engine_mod.TASK_MAP['dig'] = orig_dig
+        self.assertEqual(e.stats.dig_count, 1)
+        self.assertEqual(e.stats.alliance_help_count, 0)
+        self.assertEqual(driver.taps, [])  # fake dig task acts without tapping
+        self.assertEqual(driver.screenshots, 1)
+
+
+class TestRallyWiring(EngineTestCase):
+    """JoinRallyTask integration: DB records, toggle control, manual run."""
+
+    def test_rally_success_recorded_with_info(self):
+        class FakeRallyTask:
+            last_join_info = 'DE Lv.26'
+
+            def __init__(self, driver, rally_preference):
+                self.driver = driver
+                self.rally_preference = rally_preference
+
+            def run(self, *args, **kwargs):
+                return ('DE', 26, True)
+
+        engine_mod.TASK_MAP['rally'] = FakeRallyTask
+        e = self.engine
+        e.start()
+
+        e.run_task('rally')
+        self.assertTrue(wait_for(
+            lambda: any("✅ Task 'rally' succeeded." == m for m in self.messages), timeout=5))
+
+        records = self.logger.fetch_all()
+        self.assertEqual([r['event'] for r in records], ['rally'])
+        self.assertEqual(records[0]['info'], 'DE Lv.26')
+        self.assertIsNone(records[0]['capture'])
+
+    def test_run_task_receives_rally_preference(self):
+        seen = []
+
+        class FakeRallyTask:
+            def __init__(self, driver, rally_preference):
+                seen.append(rally_preference)
+
+            def run(self, *args, **kwargs):
+                return False
+
+        engine_mod.TASK_MAP['rally'] = FakeRallyTask
+        e = self.engine
+        e.start()
+
+        e.run_task('rally')
+        self.assertTrue(wait_for(
+            lambda: any("✅ Task 'rally' failed." == m for m in self.messages), timeout=5))
+        self.assertEqual(seen, [e._rally_preference])
+
+    def test_rally_toggle_control(self):
+        e = self.engine
+        e.disable_task('rally')
+        self.assertIn("⏸️ Cycle task 'rally' disabled.", self.messages)
+        self.assertIn('❌ rally', e.format_tasks())
+        e.enable_task('rally')
+        self.assertIn("✅ Cycle task 'rally' enabled.", self.messages)
+        self.assertIn('✅ rally', e.format_tasks())
 
 
 class TestActivityRecording(EngineTestCase):

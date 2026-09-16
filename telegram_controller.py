@@ -483,6 +483,8 @@ class TelegramController:
         lines = [f'📋 Last {len(records)} records:']
         for r in records:
             line = f"{r['id']}. [{r['time']}] {r['event']}"
+            if r.get('info'):
+                line += f" — {r['info']}"
             if r['capture']:
                 line += f" — {r['capture']}"
             lines.append(line)
@@ -497,6 +499,8 @@ class TelegramController:
             return
 
         line = f"#{record['id']} [{record['time']}] {record['event']}"
+        if record.get('info'):
+            line += f" — {record['info']}"
         if record['capture']:
             line += f" — {record['capture']}"
         await bot.send_message(chat_id=chat_id, text=line)

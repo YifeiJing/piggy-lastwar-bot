@@ -8,10 +8,27 @@ ACCOUNTS = [
     {
         'user_id': 'player1',
         'device_id': '172.29.160.1:5555',
-        # Omit 'enabled_tasks' to run all cycle tasks (help, dig, lucky_gift).
+        # Omit 'enabled_tasks' to run all cycle tasks (help, dig, lucky_gift, rally).
         # 'launch' always runs and cannot be disabled.
         # List only the tasks you want active for this account:
         # 'enabled_tasks': ['help', 'dig'],
+        # 'rally_preference' : [
+        #     {
+        #         'name': 'DE', # Doom Elite
+        #         'enabled': False,
+        #         'level': 30
+        #     },
+        #     {
+        #         'name': 'DW', # Doom Walker
+        #         'enabled': False,
+        #         'level': 170
+        #     },
+        #     {
+        #         'name': 'ZB', # Zombie Boss
+        #         'enabled': True,
+        #         'level': 70
+        #     }
+        # ]
     },
     # {
     #     'user_id': 'player2',
