@@ -99,6 +99,10 @@ class ExitStuckStateTask(BaseTask):
                 return self.wait_and_click(os.path.join(ASSETS_DIR, 'shop_exit_btn.png'), 1)
             return False
 
+        if (self.ocr_engine.check_text_exists(screen, '任意位置', scan_area=(300, 1400, 500, 1500))):
+            print("[*] Starting: Exit stuck state... [teleport]")
+            self.driver.back()
+            return True
         # Healthy base view: dismiss the distance HUD if present
         pos_distance = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'base_distance_btn.png'), threshold=0.8)
         if pos_distance:
