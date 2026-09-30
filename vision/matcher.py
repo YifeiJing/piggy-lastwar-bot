@@ -7,13 +7,22 @@ import time
 
 class TemplateMatcher:
     @staticmethod
-    def find_template(screen: np.ndarray, template_path: str, threshold: float = 0.82, scan_area: Optional[Tuple[int, int, int, int]] = None) -> Optional[Tuple[int, int]]:
+    def find_template(screen: np.ndarray, template_path: str, threshold: float = 0.82, scan_area: Optional[Tuple[int, int, int, int]] = None, scale = 1.0) -> Optional[Tuple[int, int]]:
         template = cv2.imread(template_path)
+        template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
         if template is None or screen is None:
             return None
 
         if scan_area:
-            screen = screen[scan_area[1]:scan_area[3], scan_area[0]:scan_area[2]]
+            # the scan_area here is based on the positions in a 900 * 1600 screen
+            screen = screen[int(scan_area[1] * scale): int(scan_area[3] * scale), int(scan_area[0] * scale): int(scan_area[2] * scale)]
+        screen = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
+        # scale the template
+        if scale != 1.0:
+            # template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            t_h, t_w = template.shape[:2]
+            new_w, new_h = int(t_w * scale), int(t_h * scale)
+            template = cv2.resize(template, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
         res = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
@@ -39,7 +48,7 @@ class TemplateMatcher:
         for pt in zip(*loc[::-1]):
             points.append((pt[0] + w // 2, pt[1] + h // 2))
         return points
-
+    
 def measure_template_matching_performance(screen: np.ndarray, template_path: str, threshold: float = 0.82, iterations: int = 10, scan_range = None) -> float:
     total_time = 0.0
     screen_to_use = screen if scan_range is None else screen[scan_range[1]:scan_range[3], scan_range[0]:scan_range[2]]

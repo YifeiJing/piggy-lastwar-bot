@@ -333,7 +333,7 @@ class BotEngine:
             if launch_task.run(screen=screen):
                 if launch_task.just_launched:
                     self._record_task('launch', launch_task)
-                    self._sleep(20)
+                    # self._sleep(20)
                     return
                 # Game is in the foreground — the frame can carry dialogs and
                 # task triggers. (Scan areas assume the game screen's

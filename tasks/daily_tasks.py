@@ -80,7 +80,20 @@ class ExitStuckStateTask(BaseTask):
             print("[*] Starting: Exit stuck state... [chat]")
             self.driver.tap(pos[0], pos[1])
             return True
+        
+        if (self.ocr_engine.check_text_exists(screen, '跳過')):
+            print("[*] Starting: Exit stuck state... [story]")
+            pos_skip_button = self.ocr_engine.get_text_position(screen, '跳過')
+            self.driver.tap(int((pos_skip_button[0] + pos_skip_button[2])/2), int((pos_skip_button[1] + pos_skip_button[3])/2))
+            return True
+            
+        # Healthy base view: dismiss the distance HUD if present
+        pos_distance = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'base_distance_btn.png'), threshold=0.8)
+        if pos_distance:
+            self.driver.tap(pos_distance[0], pos_distance[1])
+            return True
 
+        
         pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'gather_location_confirm_frame.png'), threshold=0.8)
         if pos:
             print("[*] Starting: Exit stuck state... [gather]")
@@ -90,23 +103,19 @@ class ExitStuckStateTask(BaseTask):
                 return True
             return False
 
-        if (self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'base_btn.png'), threshold=0.8) is None
-                and self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'world_btn.png'), threshold=0.8) is None):
+        if (self.ocr_engine.check_text_exists(screen, '任意位置', scan_area=(300, 1400, 500, 1500))):
+            print("[*] Starting: Exit stuck state... [teleport]")
+            self.driver.tap(810, 1420)
+            return True
+
+        if (self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'base_btn.png'), threshold=0.92) is None
+                and self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'world_btn.png'), threshold=0.92) is None):
             print("[*] Starting: Exit stuck state... [base]")
             pos_shop = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'shop_btn.png'))
             if pos_shop:
                 self.driver.tap(pos_shop[0], pos_shop[1])
                 return self.wait_and_click(os.path.join(ASSETS_DIR, 'shop_exit_btn.png'), 1)
             return False
-
-        if (self.ocr_engine.check_text_exists(screen, '任意位置', scan_area=(300, 1400, 500, 1500))):
-            print("[*] Starting: Exit stuck state... [teleport]")
-            self.driver.back()
-            return True
-        # Healthy base view: dismiss the distance HUD if present
-        pos_distance = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'base_distance_btn.png'), threshold=0.8)
-        if pos_distance:
-            self.driver.tap(pos_distance[0], pos_distance[1])
         return True
 
 class GameLaunchTask(BaseTask):
@@ -130,6 +139,8 @@ class GameLaunchTask(BaseTask):
             pos = self.matcher.find_template(img, os.path.join(ASSETS_DIR, 'game_app.png'))
             if pos:
                 self.driver.tap(pos[0], pos[1])
+                while(not self.check_exists(os.path.join(ASSETS_DIR, 'world_btn.png'))):
+                    time.sleep(5)
                 self.just_launched = True
                 return True
             else:

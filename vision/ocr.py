@@ -43,8 +43,10 @@ class OCREngine:
         if image is None:
             return []
         if scan_area:
-            image = image[scan_area[1]:scan_area[3], scan_area[0]:scan_area[2]]
-        result = self._engine()(image)
+            _image = image[scan_area[1]:scan_area[3], scan_area[0]:scan_area[2]]
+        else:
+            _image = image
+        result = self._engine()(_image)
         return list(result.txts or [])
 
     def check_text_exists(self, image, target_text: str, scan_area: Optional[Tuple[int, int, int, int]] = None) -> bool:
