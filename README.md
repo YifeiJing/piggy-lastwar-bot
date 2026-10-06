@@ -1,14 +1,37 @@
 # Last War: Survival WSL Automation Toolkit
 
-Modular, lightweight automation toolkit tailored for Windows Android Emulators connected via ADB to WSL2.
+Modular, lightweight automation toolkit tailored for Windows Android Emulators,
+driven either over ADB (WSL2-friendly) or directly through MuMu Player's IPC.
 
 ## Structure
-- `core/`: Low-overhead ADB streaming screencap and human-like input tap/swipe driver.
+- `core/`: Low-overhead screencap and human-like input tap/swipe drivers
+  (`adb_driver.py`, `mumu_driver.py`).
 - `vision/`: Normalized cross-correlation template matching.
 - `tasks/`: Composable daily task workflows (Alliance Tech, Resource harvesting).
 - `tools/`: Screenshot capture tool for quick asset sampling.
 - `assets/`: Sub-images for template matching.
 - `config.py`: Host ADB bridge IP and resolution configurations.
+
+## Drivers
+Each account picks its driver with the `driver` key in `config.py`:
+
+- `'adb'` (default) — connects to `device_id`, e.g. `172.29.160.1:5555`.
+- `'mumu'` — talks to `external_renderer_ipc.dll` directly, so no ADB bridge is
+  needed. Give it the emulator's `simulator_index` (0-based, as used by
+  `MuMuManager.exe -v <index>`); the emulator folder comes from the top-level
+  `MUMU_SIMULATOR_FOLDER`.
+
+```python
+ACCOUNTS = [
+    {'user_id': 'player1', 'driver': 'mumu', 'simulator_index': 0},
+    # {'user_id': 'player2', 'driver': 'adb', 'device_id': '172.29.160.1:5555'},
+]
+```
+
+MuMu IPC capture is roughly two orders of magnitude faster than `adb exec-out
+screencap` (~8 ms vs ~700 ms per frame), which is the main reason to prefer it.
+Smoke-test the MuMu path on its own with `python -m core.mumu_driver` — it
+connects, grabs one frame and saves it.
 
 ## Quickstart
 1. `pip install -r requirements.txt`

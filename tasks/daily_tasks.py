@@ -129,36 +129,36 @@ class GameLaunchTask(BaseTask):
         if img is None:
             print('[-] Screenshot failed during game launch check')
             return False
-
-        height, width, channels = img.shape
-        if height == 1600 and width == 900:
-            # Game already launched
-            return True
-        else:
-            print('Launching the game')
-            pos = self.matcher.find_template(img, os.path.join(ASSETS_DIR, 'game_app.png'))
-            if pos:
-                self.driver.tap(pos[0], pos[1])
+        for game_icon in ['game_app_large.png', 'game_app_small.png']:
+            game_icon_path = os.path.join(ASSETS_DIR, game_icon)
+            game_icon_pos = self.matcher.find_template(img, game_icon_path)
+            
+            if game_icon_pos:
+                print('Launching the game')
+                self.driver.tap(game_icon_pos[0], game_icon_pos[1])
                 while(not self.check_exists(os.path.join(ASSETS_DIR, 'world_btn.png'))):
                     time.sleep(5)
                 self.just_launched = True
                 return True
-            else:
-                print('Cannot find the game icon')
-                return False
+
+        if (not self.check_exists(os.path.join(ASSETS_DIR, 'world_btn.png')) and not self.check_exists(os.path.join(ASSETS_DIR, 'base_btn.png'))):
+            print('[-] Game not running and no icon found')
+            return False
+        return True
 
 class DigTask(BaseTask):
     """Digging task"""
-    def __init__(self, driver):
+    def __init__(self, driver, dig_strategy='check_and_tap'):
         super().__init__(driver)
         self.last_capture_id = None
+        self.dig_strategy = dig_strategy
 
     def run(self, trigger_pos=None):
         self._raise_if_killed()
         icon_dig = os.path.join(ASSETS_DIR, 'extravacator_notification.png')
         pos = trigger_pos if trigger_pos is not None else self.check_exists(icon_dig, threshold=0.8)
         if pos:
-            self._notify("[*] Starting: Digging Task...")
+            self._notify("[*] Starting: Digging Task... - strategy: " + self.dig_strategy)
 
             self.driver.tap(pos[0], pos[1], jitter=3, sleep_time=0.3)
             # time.sleep(1)
@@ -178,7 +178,7 @@ class DigTask(BaseTask):
                 pos_dig_btn = (450, 740)
                 self.driver.tap(pos_dig_btn[0], pos_dig_btn[1], jitter=3, sleep_time=0.3)
                 # save_capture(self.driver.screenshot())
-                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'dig_btn.png'), timeout=1) and not self.wait_and_click(os.path.join(ASSETS_DIR, 'fix_btn.png'), timeout=1)):
+                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'dig_btn.png'), timeout=2) and not self.wait_and_click(os.path.join(ASSETS_DIR, 'fix_btn.png'), timeout=2)):
                     exit_stuck_task = ExitStuckStateTask(self.driver)
                     if exit_stuck_task.run():
                         self._notify('⚠️ Stuck state detected and exited during dig task.')
@@ -208,24 +208,65 @@ class DigTask(BaseTask):
                 self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=5)
                 # Wait for the dig action to complete
                 cnt = 1
-                gift_collected = True
-                gift_scan_area = (370,620,510,770)
+                gift_collected = False
+                gift_scan_area = (370,600,510,770)
                 gift_name_scan_area = (320,800,660,870)
-                while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.7, scan_area=gift_scan_area)):
-                    # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
-                    if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png'), scan_area=gift_scan_area) or (not self.check_text_exists("挖掘點", scan_area=gift_name_scan_area) and not self.check_text_exists("實驗無人機", scan_area=gift_name_scan_area)))):
-                        gift_collected = False
-                        break
-                    cnt += 1
-                    # time.sleep(0.1)
+                if self.dig_strategy == 'pre_tap':
+                    pre_tap_times = 30
+                    while(not gift_collected):
+                        txts = self.ocr_engine.extract_texts(self.driver.screenshot(), gift_scan_area)
+
+                        for i in range(len(txts)):
+                            txt = txts[i]
+                            if txt.find(':') != -1:
+                                gift_collected = False
+                                # parse the time now
+                                bufs = txt.split(':')
+                                if len(bufs) == 2:
+                                    mins = int(bufs[0])
+                                    secs = int(bufs[1])
+                                    total_secs = mins * 60 + secs
+                                    self._notify(f"[!] Gift not available yet, next gift in {total_secs} seconds.")
+                                    if total_secs <= 5:
+                                        # Pre-tap before the gift ready to avoid missing the gift due to the delay of the tap
+                                        self._notify(f"[!] Pre-tapping {pre_tap_times} times before the gift is ready.")
+                                        time.sleep(total_secs - 1)
+                                        for i in range(pre_tap_times):
+                                            self.driver.tap(445, 730, jitter=3, sleep_time=0.02)
+                                        current_frame = self.driver.screenshot()
+                                        close_btn_pos = self.matcher.find_template(current_frame, os.path.join(ASSETS_DIR, 'dig_result_close_btn.png'), threshold=0.8, scan_area=(787, 144, 882, 248))
+                                        if close_btn_pos:
+                                            self.last_capture_id = save_capture(self.driver.screenshot())
+                                            self.driver.tap(close_btn_pos[0], close_btn_pos[1], jitter=1, sleep_time=0.1)
+                                            gift_collected = True
+                                            break
+                                        share_location_close_btn_pos = self.matcher.find_template(current_frame, os.path.join(ASSETS_DIR, 'share_location_close_btn.png'), threshold=0.8, scan_area=(776, 252, 874, 354))
+                                        if share_location_close_btn_pos:
+                                            self._notify("Collected gift but not sure the collected one, because pre-tap opened the shared location page")
+                                            self.driver.tap(share_location_close_btn_pos[0], share_location_close_btn_pos[1], jitter=1, sleep_time=0.1)
+                                            self.last_capture_id = save_capture(self.driver.screenshot())
+                                            gift_collected = True
+                                            break
+                            else:
+                                if i == len(txts) - 1:
+                                    self._notify("Could not get the left time")
+                                    break
+                else:                        
+                    while(not self.wait_and_click(os.path.join(ASSETS_DIR, 'gift_available.png'), timeout=5, interval=0.07, scan_area=gift_scan_area)):
+                        # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
+                        if (cnt % 10 == 0 and (self.check_exists(os.path.join(ASSETS_DIR, 'share_btn.png'), scan_area=gift_scan_area) or (not self.check_text_exists("挖掘點", scan_area=gift_name_scan_area) and not self.check_text_exists("實驗無人機", scan_area=gift_name_scan_area)))):
+                            gift_collected = False
+                            break
+                        cnt += 1
                 if gift_collected:
                     self._notify("[+] Gift collected.")
                 time.sleep(0.5)
                 # Save the reward screen for the activity log
-                self.last_capture_id = save_capture(self.driver.screenshot())
+                if self.dig_strategy != 'pre_tap':
+                    self.last_capture_id = save_capture(self.driver.screenshot())
                 # Exit gift page
                 # self.driver.tap(450, 1300, jitter=3, sleep_time=0.3)
-                if gift_collected:
+                if gift_collected and self.dig_strategy != 'pre_tap':
                     self.driver.press_back()
                     time.sleep(0.5)
                     send_chat_flower_task = SendChatFlowerTask(self.driver)
@@ -274,7 +315,7 @@ class LuckyGiftTask(BaseTask):
         return False
 
 class JoinRallyTask(BaseTask):
-    def __init__(self, driver, rally_preference):
+    def __init__(self, driver, rally_preference = None):
         super().__init__(driver)
         self._rally_preference = rally_preference
         self.last_join_info = None
@@ -384,3 +425,25 @@ class JoinRallyTask(BaseTask):
                 return False
         self.wait_and_click(os.path.join(ASSETS_DIR, 'go_back_btn.png'), timeout=2)
         return False
+
+class CongratulationsTask(BaseTask):
+    """When members' base is upgraded, need to collect the congratulation gift"""
+    def run(self, trigger_pos=None):
+        self._raise_if_killed()
+        if trigger_pos is not None:
+            self.driver.tap(trigger_pos[0], trigger_pos[1])
+        else:
+            congrats_notification_pos = self.check_exists(os.path.join(ASSETS_DIR, 'congrats_notification.png'), threshold=0.8, scan_area=(600,1300,750,1480))
+            if congrats_notification_pos:
+                self.driver.tap(congrats_notification_pos[0], congrats_notification_pos[1])
+            else:
+                return False
+        
+        res = self.wait_and_click(os.path.join(ASSETS_DIR, 'congrats_btn.png'), timeout=5)
+        if res:
+            # print('Helped alliance')
+            self._notify("[+] Congratulations gift collected.")
+            return True
+        else:
+            # print('No help found')
+            return False

@@ -16,7 +16,8 @@ from tasks.daily_tasks import (
     GameLaunchTask,
     LuckyGiftTask,
     SendChatFlowerTask,
-    JoinRallyTask
+    JoinRallyTask,
+    CongratulationsTask
 )
 from vision.matcher import TemplateMatcher
 from vision.ocr import OCREngine
@@ -27,12 +28,13 @@ TASK_MAP = {
     'lucky_gift': LuckyGiftTask,
     'launch': GameLaunchTask,
     'flower': SendChatFlowerTask,
-    'rally': JoinRallyTask
+    'rally': JoinRallyTask,
+    'congratulations': CongratulationsTask
 }
 
 # Tasks that participate in the automatic cycle and can be toggled on/off.
 # 'launch' is not included — it always runs at the top of every cycle.
-CYCLE_TASKS = frozenset({'help', 'dig', 'lucky_gift', 'rally'})
+CYCLE_TASKS = frozenset({'help', 'dig', 'lucky_gift', 'rally', 'congratulations'})
 
 # Priority-ordered trigger detection for the automatic cycle: task name →
 # notification template + match threshold (mirrors what each task uses).
@@ -42,6 +44,7 @@ CYCLE_DETECTORS = (
     ('dig',        'extravacator_notification.png', 0.8, (600,1300,750,1480)),  # scan area for dig notification
     ('lucky_gift', 'lucky_gift_notification.png',   0.82, (600,1300,750,1480)),  # scan area for lucky gift notification
     ('rally',     'party_notification_btn.png',    0.8, (770, 966, 872, 1072)),
+    ('congratulations', 'congrats_notification.png', 0.8, (600,1300,750,1480)),
     ('help',       'help_btn.png',                  0.82, (645,1060,960,1190)),  # scan area for help notification
 )
 
@@ -60,12 +63,13 @@ class Stats:
         self.alliance_help_count = 0
         self.dig_count = 0
         self.lucky_gift_count = 0
-
+        self.congratulations_count = 0
     def format_stats(self) -> str:
         return (
             f"Alliance Help Executed: {self.alliance_help_count}\n"
             f"Digging Executed: {self.dig_count}\n"
-            f"Lucky Gift Collected: {self.lucky_gift_count}"
+            f"Lucky Gift Collected: {self.lucky_gift_count}\n"
+            f"Congratulations Gifts Collected: {self.congratulations_count}"
         )
 
     def print_stats(self):
@@ -78,7 +82,7 @@ class Stats:
         self.alliance_help_count = 0
         self.dig_count = 0
         self.lucky_gift_count = 0
-
+        self.congratulations_count = 0
 
 class BotEngine:
     """Controllable game loop: pause/stop events + a queue for remotely
@@ -110,6 +114,12 @@ class BotEngine:
         for acc in ACCOUNTS:
             if user_id == acc['user_id']:
                 self._rally_preference = acc.get('rally_preference', [])
+        # create all task instances here
+        self._task_instances = {name: TASK_MAP[name](self.driver) for name in TASK_MAP}
+        self._task_instances['rally']._rally_preference = self._rally_preference
+        self._task_instances['dig'].dig_strategy = acc.get('dig_strategy', 'check_and_tap')
+        for task in self._task_instances.values():
+            task.set_notifier(self._notify) 
 
     # ---- remote control API ----
 
@@ -146,6 +156,77 @@ class BotEngine:
             if self._thread:
                 self._thread.join(timeout=5)
 
+    def set_rally_preference(self, preference: list):
+        """Set the rally preference for the JoinRallyTask."""
+        self._rally_preference = preference
+        if 'rally' in self._task_instances:
+            self._task_instances['rally']._rally_preference = preference
+
+    def set_DE_preference(self, enabled: bool, level: int):
+        """Set the rally preference for Doom Elite (DE)."""
+        for pref in self._rally_preference:
+            if pref['name'] == 'DE':
+                pref['enabled'] = enabled
+                pref['level'] = level
+                self._notify(f"Rally preference updated: DE - Enabled: {enabled}, Level: {level}")
+                break
+
+    def set_DW_preference(self, enabled: bool, level: int):
+        """Set the rally preference for Doom Walker (DW)."""
+        for pref in self._rally_preference:
+            if pref['name'] == 'DW':
+                pref['enabled'] = enabled
+                pref['level'] = level
+                self._notify(f"Rally preference updated: DW - Enabled: {enabled}, Level: {level}")
+                break
+
+    def set_ZB_preference(self, enabled: bool, level: int):
+        """Set the rally preference for Zombie Boss (ZB)."""
+        for pref in self._rally_preference:
+            if pref['name'] == 'ZB':
+                pref['enabled'] = enabled
+                pref['level'] = level
+                self._notify(f"Rally preference updated: ZB - Enabled: {enabled}, Level: {level}")
+                break
+
+    def set_dig_strategy(self, strategy: str):
+        """Set the dig strategy for the DigTask."""
+        if strategy not in ['check_and_tap', 'pre_tap']:
+            self._notify(f"❌ Invalid dig strategy: {strategy}. Must be 'check_and_tap' or 'pre_tap'.")
+            return
+        self._task_instances['dig'].dig_strategy = strategy
+        self._notify(f"✅ Dig strategy updated to: {strategy}")
+    
+    def format_tasks(self) -> str:
+        lines = []
+        for name in sorted(CYCLE_TASKS):
+            icon = '✅' if name in self.enabled_tasks else '❌'
+            desc = ''
+            if name == 'rally':
+                # print the rally preference level if enabled
+                if self._rally_preference:
+                    levels = [f"{pref['name']} (Lv {pref['level']})" for pref in self._rally_preference if pref.get('enabled', False)]
+                    if levels:
+                       desc = f" - {', '.join(levels)} enabled"
+            elif name == 'dig':
+                # print the dig strategy if enabled
+                desc = f" - Strategy: {self._task_instances['dig'].dig_strategy}"
+
+            lines.append(f'{icon} {name} {desc}')
+            
+
+        return 'Cycle tasks:\n' + '\n'.join(lines)
+    
+    def format_settings(self) -> str:
+        lines = [
+            f"User ID: {self.user_id}",
+            f"Driver: {type(self.driver).__name__}",
+            f"Cycle Interval: {self.cycle_interval:.1f}s",
+            f"Status: {self.status}",
+            self.format_tasks(),
+        ]
+        return '\n'.join(lines)
+    
     def start_loop(self):
         if not self.stop_event.is_set() and not self.pause_event.is_set():
             self._notify('ℹ️ Auto loop is already running.')
@@ -153,6 +234,8 @@ class BotEngine:
         self.stop_event.clear()
         self.pause_event.clear()
         self._notify('▶️ Auto loop started.')
+        # Show current settings
+        self._notify(self.format_settings())
 
     def stop_loop(self):
         if self.stop_event.is_set():
@@ -195,13 +278,6 @@ class BotEngine:
             return
         self.enabled_tasks.discard(name)
         self._notify(f"⏸️ Cycle task '{name}' disabled.")
-
-    def format_tasks(self) -> str:
-        lines = []
-        for name in sorted(CYCLE_TASKS):
-            icon = '✅' if name in self.enabled_tasks else '❌'
-            lines.append(f'{icon} {name}')
-        return 'Cycle tasks:\n' + '\n'.join(lines)
 
     def kill_task(self):
         """Abort the currently running task (dead-loop rescue).
@@ -287,6 +363,8 @@ class BotEngine:
             self.logger.log_lucky_gift(getattr(task, 'last_capture_id', None))
         elif name == 'rally':
             self.logger.log_rally(getattr(task, 'last_join_info', None))
+        elif name == 'congratulations':
+            self.logger.log_congratulations(getattr(task, 'last_capture_id', None))
         elif name == 'launch':
             # Only record when the game was actually started, not every
             # cycle's "already running" check.
@@ -354,8 +432,7 @@ class BotEngine:
                     if not pos:
                         continue
 
-                    task = TASK_MAP[name](self.driver) if name != 'rally' else TASK_MAP[name](self.driver, self._rally_preference)
-                    task.set_notifier(self._notify)
+                    task = self._task_instances[name]
                     if task.run(trigger_pos=pos):
                         if name == 'help':
                             self.stats.alliance_help_count += 1
@@ -365,6 +442,8 @@ class BotEngine:
                             self.stats.lucky_gift_count += 1
                         elif name == 'rally':
                             self.team_state = TeamState.RALLYING
+                        elif name == 'congratulations':
+                            self.stats.congratulations_count += 1
                         self._record_task(name, task)
                         self._notify_capture(name, task)
                     return  # one action per cycle; next cycle rescans

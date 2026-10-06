@@ -12,6 +12,23 @@ except ImportError:
     ACCOUNTS = [{'user_id': 'default', 'device_id': DEVICE_ID}]
 
 
+def build_driver(acc):
+    """Instantiate the driver named by the account's 'driver' key (default 'adb').
+
+    'adb'  — AdbDriver over a device_id (e.g. 172.29.160.1:5555)
+    'mumu' — MuMu12IPC over the emulator's simulator_index, no adb needed
+    """
+    kind = acc.get('driver', 'adb').lower()
+    if kind == 'mumu':
+        from core.mumu_driver import MuMu12IPC  # imported lazily: loads the renderer DLL
+        return MuMu12IPC(simulator_index=acc.get('simulator_index', 0))
+    if kind == 'adb':
+        return AdbDriver(device_id=acc['device_id'])
+    raise ValueError(
+        f"Unknown driver {kind!r} for account {acc.get('user_id')!r} — expected 'adb' or 'mumu'."
+    )
+
+
 def main():
     print("==========================================")
     print("       Last War: Survival Bot Engine       ")
@@ -21,8 +38,9 @@ def main():
     drivers = {}
     for acc in ACCOUNTS:
         uid = acc['user_id']
-        drv = AdbDriver(device_id=acc['device_id'])
-        eng = BotEngine(drv, cycle_interval=1.0, user_id=uid,
+        drv = build_driver(acc)
+        print(f"[*] {uid}: using {type(drv).__name__} driver")
+        eng = BotEngine(drv, cycle_interval=3.0, user_id=uid,
                         enabled_tasks=acc.get('enabled_tasks'))
         # load the ocr model once
         eng.ocr_engine._engine()

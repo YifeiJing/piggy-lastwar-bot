@@ -4,13 +4,14 @@ import time
 import cv2
 import sys
 from config import DEVICE_ID, ASSETS_DIR, DUMP_DIR
-from core.adb_driver import AdbDriver
+from core.mumu_driver import MuMu12IPC
 from vision.matcher import TemplateMatcher, measure_template_matching_performance
 from vision.ocr import OCREngine, measure_ocr_performance
 
 def main():
     print(f"[*] Capturing screen from {DEVICE_ID}...")
-    driver = AdbDriver(device_id=DEVICE_ID)
+    driver = MuMu12IPC(simulator_index=0)
+    driver.connect()
     start_time = time.perf_counter()
     img = driver.screenshot()
     end_time = time.perf_counter()
@@ -78,6 +79,25 @@ def measure_ocr_performance_on_latest(iterations: int = 10):
     average_time = measure_ocr_performance(img, iterations)
     print(f"Average OCR time over {iterations} iterations: {average_time:.6f} seconds.")
 
+def measure_template_matching_tap_performance(template_path: str, threshold: float = 0.82, iterations: int = 5, scan_range=None):
+    matcher = TemplateMatcher()
+    total_time = 0.0
+    driver = MuMu12IPC(simulator_index=0)
+    driver.connect()
+    img = driver.screenshot()
+    pos = matcher.find_template(img, template_path, scan_area=scan_range)
+    for i in range(iterations):
+        start_time = time.perf_counter()
+        if pos is not None:
+            driver.tap(pos[0], pos[1], sleep_time=None)
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        total_time += elapsed_time
+        print(f"Iteration {i + 1}: Template matching completed in {elapsed_time:.6f} seconds. Position found: {pos}")
+
+    average_time = total_time / iterations
+    return average_time
+
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--perf':
         capture_perf_estimation()
@@ -86,5 +106,9 @@ if __name__ == '__main__':
         measure_template_matching_performance_on_latest(template_path)
     elif len(sys.argv) > 1 and sys.argv[1] == '--ocr-perf':
         measure_ocr_performance_on_latest()
+    elif len(sys.argv) > 1 and sys.argv[1] == '--match-tap-perf':
+        template_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ASSETS_DIR, 'template.png')
+        average_time = measure_template_matching_tap_performance(template_path, iterations=8, scan_range=(450,800,800,1500))
+        print(f"Average template matching and tap time over iterations: {average_time:.6f} seconds.")
     else:
         main()

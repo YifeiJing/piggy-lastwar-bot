@@ -233,6 +233,10 @@ class TelegramController:
             '/swipe <x1> <y1> <x2> <y2> [ms] — swipe\n'
             '/back — Android back button\n'
             '/resetstats — reset counters\n'
+            '/setde <enabled> <level> — set Doom Elite preference\n'
+            '/setdw <enabled> <level> — set Doom Walker preference\n'
+            '/setzb <enabled> <level> — set Zombie Boss preference\n'
+            '/setdig <strategy> — set dig strategy (check_and_tap or pre_tap)\n'
             + user_cmds +
             '/help — this text'
         )
@@ -325,7 +329,7 @@ class TelegramController:
             self._active_user[chat_id] = uid
             await msg.reply_text(f'✅ Now watching: {uid}')
         elif cmd == '/status':
-            await msg.reply_text(f'📊 Engine: {engine.status}\n{engine.stats.format_stats()}')
+            await msg.reply_text(f'📊 Engine: {engine.status}\n{engine.stats.format_stats()}\n{engine.format_settings()}')
             if not await self._send_screenshot(chat_id, driver):
                 await msg.reply_text('❌ Screenshot failed (device not reachable?)')
         elif cmd == '/screenshot':
@@ -344,9 +348,7 @@ class TelegramController:
         elif cmd == '/stats':
             await msg.reply_text(engine.stats.format_stats())
         elif cmd == '/report':
-            await msg.reply_text(f'📊 Engine: {engine.status}\n{engine.stats.format_stats()}')
-            if not await self._send_screenshot(chat_id, driver):
-                await msg.reply_text('❌ Screenshot failed (device not reachable?)')
+            await msg.reply_text(f'📊 Engine: {engine.status}\n{engine.stats.format_stats()}\n{engine.format_settings()}')
         elif cmd == '/history':
             try:
                 n = int(args[0]) if args else 10
@@ -409,6 +411,47 @@ class TelegramController:
         elif cmd == '/resetstats':
             engine.reset_stats()
             await msg.reply_text('✅ Stats reset')
+        elif cmd == '/setde':
+            if len(args) < 2:
+                await msg.reply_text('Usage: /setde <enabled> <level>')
+                return
+            enabled = args[0].lower() in ('1', 'true', 'yes', 'on')
+            try:
+                level = int(args[1])
+            except ValueError:
+                await msg.reply_text('Level must be an integer.')
+                return
+            engine.set_DE_preference(enabled, level)
+            await msg.reply_text(f'✅ Doom Elite set to enabled={enabled}, level={level}')
+        elif cmd == '/setdw':
+            if len(args) < 2:
+                await msg.reply_text('Usage: /setdw <enabled> <level>')
+                return
+            enabled = args[0].lower() in ('1', 'true', 'yes', 'on')
+            try:
+                level = int(args[1])
+            except ValueError:
+                await msg.reply_text('Level must be an integer.')
+                return
+            engine.set_DW_preference(enabled, level)
+            await msg.reply_text(f'✅ Doom Walker set to enabled={enabled}, level={level}')
+        elif cmd == '/setzb':
+            if len(args) < 2:
+                await msg.reply_text('Usage: /setzb <enabled> <level>')
+                return
+            enabled = args[0].lower() in ('1', 'true', 'yes', 'on')
+            try:
+                level = int(args[1])
+            except ValueError:
+                await msg.reply_text('Level must be an integer.')
+                return
+            engine.set_ZB_preference(enabled, level)
+            await msg.reply_text(f'✅ Zombie Boss set to enabled={enabled}, level={level}')
+        elif cmd == '/setdig':
+            if not args:
+                await msg.reply_text('Usage: /setdig <strategy>')
+                return
+            engine.set_dig_strategy(args[0].lower())
         else:
             await msg.reply_text(f'❓ Unknown command.\n{self.help_text(chat_id)}')
 

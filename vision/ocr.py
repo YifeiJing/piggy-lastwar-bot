@@ -4,7 +4,7 @@
 rapidocr 3.x API: RapidOCR() (bundled PP-OCRv6 models, CPU onnxruntime),
 callable with an image, returns RapidOCROutput with .txts/.boxes/.scores."""
 import threading
-from typing import List
+from typing import List, Optional, Tuple
 
 import cv2
 from rapidocr import RapidOCR

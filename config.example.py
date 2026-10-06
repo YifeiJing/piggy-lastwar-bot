@@ -7,7 +7,9 @@ import os
 ACCOUNTS = [
     {
         'user_id': 'player1',
-        'device_id': '172.29.160.1:5555',
+        'driver': 'mumu',  # 'adb' or 'mumu'
+        # 'device_id': '172.29.160.1:5555',
+        'simulator_index': 0,  # either use device_id or mumu ipc based simulator_index, not both
         # Omit 'enabled_tasks' to run all cycle tasks (help, dig, lucky_gift, rally).
         # 'launch' always runs and cannot be disabled.
         # List only the tasks you want active for this account:
@@ -32,16 +34,18 @@ ACCOUNTS = [
     },
     # {
     #     'user_id': 'player2',
-    #     'device_id': '172.29.160.1:5556',
+    #     'driver': 'mumu',
+    #     'simulator_index': 1,
     #     'enabled_tasks': ['help', 'lucky_gift'],
     # },
 ]
-
+MUMU_SIMULATOR_FOLDER = 'E:\\mumu\\MuMuPlayer\\nx_main'
 # Legacy alias used by capture_tool.py; derived from the first account.
-DEVICE_ID = ACCOUNTS[0]['device_id']
+# Empty when the first account drives MuMu over IPC instead of adb.
+DEVICE_ID = ACCOUNTS[0].get('device_id', '')
 
-SCREEN_WIDTH = 1600
-SCREEN_HEIGHT = 900
+SCREEN_WIDTH = 900
+SCREEN_HEIGHT = 1600
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, 'assets')

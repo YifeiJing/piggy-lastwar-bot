@@ -62,6 +62,9 @@ class ActivityLogger:
 
     def log_help(self):
         self._insert('help', None)
+        
+    def log_congratulations(self, capture: Optional[str] = None):
+        self._insert('congratulations', capture)
 
     def log_dig(self, capture: Optional[str] = None):
         self._insert('dig', capture)
