@@ -596,6 +596,7 @@ class MuMu12IPC:
                 x1, y1, x2, y2,
                 duration=max(0.01, duration_ms / 1000.0),
                 steps=steps,
+                interval=0.45
             )
         time.sleep(random.uniform(0.4, 0.6))
 

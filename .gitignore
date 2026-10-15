@@ -12,3 +12,5 @@ dig_captures/
 dumps/
 *.db
 .claude/settings.local.json
+runs/
+weights/

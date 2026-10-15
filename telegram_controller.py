@@ -236,6 +236,7 @@ class TelegramController:
             '/setde <enabled> <level> — set Doom Elite preference\n'
             '/setdw <enabled> <level> — set Doom Walker preference\n'
             '/setzb <enabled> <level> — set Zombie Boss preference\n'
+            '/setzbwhitelist <enabled> <name> - set Zombie Boss whitelist so the team of the target member will be joined regardless of level\n'
             '/setdig <strategy> — set dig strategy (check_and_tap or pre_tap)\n'
             + user_cmds +
             '/help — this text'
@@ -447,6 +448,13 @@ class TelegramController:
                 return
             engine.set_ZB_preference(enabled, level)
             await msg.reply_text(f'✅ Zombie Boss set to enabled={enabled}, level={level}')
+        elif cmd == '/setzbwhitelist':
+            if len(args) < 2:
+                await msg.reply_text('Usage: /setzbwhitelist <enabled> <name>')
+                return
+            enabled = args[0].lower() in ('1', 'true', 'yes', 'on')
+            name = args[1]
+            engine.set_ZB_whitelist(enabled, name)
         elif cmd == '/setdig':
             if not args:
                 await msg.reply_text('Usage: /setdig <strategy>')

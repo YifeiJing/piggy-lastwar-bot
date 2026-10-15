@@ -51,6 +51,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, 'assets')
 DUMP_DIR = os.path.join(BASE_DIR, 'dumps')
 LOG_DIR = os.path.join(BASE_DIR, 'logs')
+MODEL_DIR = os.path.join(BASE_DIR, 'models')
 DIG_CAPTURE_DIR = os.path.join(BASE_DIR, 'dig_captures')
 
 os.makedirs(ASSETS_DIR, exist_ok=True)

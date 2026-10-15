@@ -13,18 +13,30 @@ class BaseTask:
         self.matcher = TemplateMatcher()
         self.ocr_engine = OCREngine.shared()
         self._notifier = None
+        self._photo_notifier = None
 
     def _notify(self, text: str):
-        print(f"[TG] {text}")
+        # print(f"[TG] {text}")
         if self._notifier:
             try:
                 self._notifier(text)
             except Exception as e:
                 print(f"[-] Notifier error: {e}")
 
+    def _photo_notify(self, text: str, img):
+        if self._photo_notifier:
+            try:
+                self._photo_notifier(text, img)
+            except Exception as e:
+                print(f"[-] Notifier error: {e}")
+                
     def set_notifier(self, fn):
         """fn(text) is called on engine events (logout, task results...)."""
         self._notifier = fn
+
+    def set_photo_notifier(self, fn):
+        """fn(text) is called on engine events (logout, task results...)."""
+        self._photo_notifier = fn
 
     def _raise_if_killed(self):
         if kill_event.is_set():

@@ -119,7 +119,8 @@ class BotEngine:
         self._task_instances['rally']._rally_preference = self._rally_preference
         self._task_instances['dig'].dig_strategy = acc.get('dig_strategy', 'check_and_tap')
         for task in self._task_instances.values():
-            task.set_notifier(self._notify) 
+            task.set_notifier(self._notify)
+            task.set_photo_notifier(self._photo_notifier)
 
     # ---- remote control API ----
 
@@ -141,6 +142,7 @@ class BotEngine:
 
     def start(self):
         """Spawn the engine loop thread."""
+        """Spwan a new thread every time"""
         if self._thread and self._thread.is_alive():
             return
         self._thread = threading.Thread(target=self._loop, name='bot-engine', daemon=True)
@@ -180,6 +182,21 @@ class BotEngine:
                 self._notify(f"Rally preference updated: DW - Enabled: {enabled}, Level: {level}")
                 break
 
+    def set_ZB_whitelist(self, enabled: bool, name: str):
+        """Set the whitelist preference for ZB rally"""
+        for pref in self._rally_preference:
+            if pref['name'] == 'ZB':
+                if enabled:
+                    found_name = False
+                    if name in pref['whitelist']:
+                        break
+                    pref['whitelist'].append(name)
+                else:
+                    if name in pref['whitelist']:
+                        pref['whitelist'].remove(name)
+                self._notify(f"Rally preference updated: ZB - whitelist: {','.join(pref['whitelist'])}")
+
+
     def set_ZB_preference(self, enabled: bool, level: int):
         """Set the rally preference for Zombie Boss (ZB)."""
         for pref in self._rally_preference:
@@ -188,7 +205,7 @@ class BotEngine:
                 pref['level'] = level
                 self._notify(f"Rally preference updated: ZB - Enabled: {enabled}, Level: {level}")
                 break
-
+    
     def set_dig_strategy(self, strategy: str):
         """Set the dig strategy for the DigTask."""
         if strategy not in ['check_and_tap', 'pre_tap']:
@@ -205,7 +222,7 @@ class BotEngine:
             if name == 'rally':
                 # print the rally preference level if enabled
                 if self._rally_preference:
-                    levels = [f"{pref['name']} (Lv {pref['level']})" for pref in self._rally_preference if pref.get('enabled', False)]
+                    levels = [f"{pref['name']} (Lv {pref['level']}) {('whitelist: '+','.join(pref['whitelist'])) if pref['whitelist'] is not None else ''}" for pref in self._rally_preference if pref.get('enabled', False)]
                     if levels:
                        desc = f" - {', '.join(levels)} enabled"
             elif name == 'dig':
@@ -388,6 +405,8 @@ class BotEngine:
             self._cycle_tasks()
         except TaskKilled:
             self._notify('🗡️ Running task killed.')
+        except Exception as e:
+            self._notify(f'Caught error: {e}')
         finally:
             self.current_task = None
 
