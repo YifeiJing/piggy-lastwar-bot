@@ -397,6 +397,8 @@ class TelegramController:
                 return
             driver.tap(x, y)
             await msg.reply_text(f'✅ Tapped ({x}, {y})')
+            if not await self._send_screenshot(chat_id, driver, annotated=True):
+                await msg.reply_text('❌ Screenshot failed (device not reachable?)')
         elif cmd == '/swipe':
             try:
                 x1, y1, x2, y2 = (int(a) for a in args[:4])
