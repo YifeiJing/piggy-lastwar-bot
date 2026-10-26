@@ -55,6 +55,7 @@ class GoToChatTask(BaseTask):
         
         self.driver.tap(chat_btn_pos[0], chat_btn_pos[1], jitter=3, sleep_time=0.3)
         time.sleep(0.5)
+        self.wait_and_click(os.path.join(ASSETS_DIR, 'chat_alliance_btn.png'), timeout=6)
         if self.isChatPage():
             print("[+] Chat page opened.")
             return True
@@ -210,6 +211,7 @@ class DigTask(BaseTask):
             tried_count += 1
             pos_shared_click_res = self.wait_and_click(os.path.join(ASSETS_DIR, 'location_share_frame.png'), timeout=1)
             if pos_shared_click_res:
+                time.sleep(0.5)
                 img = self.driver.screenshot()
                 if self.determine_dig_type(img) == DigType.UN:
                     return self.navigate_to_dig_location()
@@ -323,8 +325,11 @@ class DigTask(BaseTask):
                     img = self.driver.screenshot()
                     if self.matcher.find_template(img, os.path.join(ASSETS_DIR, 'share_btn.png'),  scan_area=gift_scan_area) is not None or self.determine_dig_type(img) == DigType.UN:
                         self._notify('[Dig Task] gift collected before able to collect')
+                        save_capture(img, 'dig_capture', self.capture_dump_dir)
+                        self._photo_notify('current frame', img)
                         return False
                 cnt += 1
+            time.sleep(0.5)
             return True
 
     def determine_result(self):
@@ -368,18 +373,20 @@ class DigTask(BaseTask):
                 res = int(txt)
             else:
                 if txt.find(":") != -1:
-                    cnt += 1
-                    buf = txt.split(':')
-                    if len(buf) == 3:
-                        res = 3600 * int(buf[0]) + 60 * int(buf[1]) + int(buf[2])
-                    elif len(buf) == 2:
-                        res = 60 * int(buf[0]) + int(buf[1])
+                    # We directly return a large value here, because the time is still enough
+                    return 60
+                    # cnt += 1
+                    # buf = txt.split(':')
+                    # if len(buf) == 3:
+                    #     res = 3600 * int(buf[0]) + 60 * int(buf[1]) + int(buf[2])
+                    # elif len(buf) == 2:
+                    #     res = 60 * int(buf[0]) + int(buf[1])
 
         if cnt == 1:
             return res
         else:
             return -1
-    def run(self, trigger_pos=None):
+    def run_new(self, trigger_pos=None):
         icon_dig = os.path.join(ASSETS_DIR, 'extravacator_notification.png')
         pos = trigger_pos if trigger_pos is not None else self.check_exists(icon_dig, threshold=0.8)
         if pos:
@@ -396,7 +403,8 @@ class DigTask(BaseTask):
         send_chat_flower_task = SendChatFlowerTask(self.driver)
         send_chat_flower_task.run()
         return True
-
+    def run(self, trigger_pos=None):
+        return self.run_new(trigger_pos)
     def run_bk(self, trigger_pos=None):
         start_time = time.perf_counter()
         self._raise_if_killed()
