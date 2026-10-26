@@ -654,6 +654,13 @@ class JoinRallyTask(BaseTask):
             if analyze_rally_res[i][0] is MonsterType.DE and analyze_rally_res[i][2]:
                 for pref in self._rally_preference:
                     if pref['name'] == 'DE' and pref['enabled']:
+                        if pref['whitelist'] is not None:
+                            for name in pref['whitelist']:
+                                if name in analyze_rally_res[i][3]:
+                                    join_whitelist = True
+                                    current_target = i
+                        if join_whitelist:
+                            break
                         if current_target != -1:
                             if analyze_rally_res[current_target][0] is MonsterType.DE:
                                 if analyze_rally_res[i][1] <= pref['level'] and analyze_rally_res[i][1] > analyze_rally_res[current_target][1]:
@@ -663,6 +670,13 @@ class JoinRallyTask(BaseTask):
             elif analyze_rally_res[i][0] is MonsterType.DW and analyze_rally_res[i][2]:
                 for pref in self._rally_preference:
                     if pref['name'] == 'DW' and pref['enabled']:
+                        if pref['whitelist'] is not None:
+                            for name in pref['whitelist']:
+                                if name in analyze_rally_res[i][3]:
+                                    join_whitelist = True
+                                    current_target = i
+                        if join_whitelist:
+                            break
                         if current_target != -1:
                             if analyze_rally_res[current_target][0] is MonsterType.DW:
                                 if analyze_rally_res[i][1] <= pref['level'] and analyze_rally_res[i][1] > analyze_rally_res[current_target][1]:
