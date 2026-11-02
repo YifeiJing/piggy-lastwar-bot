@@ -103,6 +103,10 @@ class ExitStuckStateTask(BaseTask):
             self.driver.tap(pos[0], pos[1])
             return True
         
+        send_out_btn_pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'send_out_btn.png'), scan_area=(200, 1000, 650, 1500))
+        if send_out_btn_pos:
+            self.driver.tap(send_out_btn_pos[0], send_out_btn_pos[1])
+
         if (self.ocr_engine.check_text_exists(screen, '跳過')):
             print("[*] Starting: Exit stuck state... [story]")
             pos_skip_button = self.ocr_engine.get_text_position(screen, '跳過')
@@ -196,17 +200,30 @@ class DigTask(BaseTask):
         """
         # Open the chat page
         open_chat_Task = GoToChatTask(self.driver)
-        res = open_chat_Task.run()
-        if not res:
-            self._notify('[Dig Task] Could not open chat page')
-            self._photo_notify('Failed screen', self.driver.screenshot())
-            return False
+        retry_cnt = 0
+
+        while True:
+            res = open_chat_Task.run()
+            if not res:
+                if retry_cnt == 3:
+                    self._notify('[Dig Task] Could not open chat page')
+                    self.gather_captures()
+                    return False
+                # Retry close and open chat
+                else:
+                    retry_cnt += 1
+                    screen = self.driver.screenshot()
+                    pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'go_back_btn.png'), threshold=0.8)
+                    if pos:
+                        self.driver.tap(pos[0], pos[1])
+            else:
+                break
         # Find the share location frame
         tried_count = 0
         while(True):
             if tried_count == 20:
                 self._notify('[Dig Task] failed to find location share frame')
-                self._photo_notify('Failed screen', self.driver.screenshot())
+                self.gather_captures()
                 return False
             tried_count += 1
             pos_shared_click_res = self.wait_and_click(os.path.join(ASSETS_DIR, 'location_share_frame.png'), timeout=1)
@@ -238,7 +255,7 @@ class DigTask(BaseTask):
                 self._notify('[Dig Task] Already collected for this task')
                 return False
             self._notify('[Dig Task] No dig object found in go_to_dig')
-            self._photo_notify('Failed screen', self.driver.screenshot())
+            self._image_notify('Failed screen', self.driver.screenshot())
 
             return False
         self._notify(f'[Dig Task] Go to {'Excavator' if dig_type is DigType.Excavator else 'Drone'}')
@@ -251,7 +268,7 @@ class DigTask(BaseTask):
         while(dig_btn_pos is None):
             if tried_times == 15:
                 self._notify('[Dig Task] Stuck at sending out squad... Re-trying')
-                self._photo_notify('Failed screen', self.driver.screenshot())
+                self._image_notify('Failed screen', self.driver.screenshot())
 
                 return self.go_to_dig()
             tried_times += 1
@@ -265,9 +282,10 @@ class DigTask(BaseTask):
         self.driver.tap(dig_btn_pos[0], dig_btn_pos[1])
 
         # send the sqaud out, here we do not select team, but there must be one team available
-        if not self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=5):
-            self._notify('Could not send out Squad, please check if there is at lease 1 squad available')
-            self._photo_notify('Failed screen', self.driver.screenshot())
+        if not self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=7):
+            self._notify('Could not send out Squad, please check if there is at least 1 squad available')
+            self._image_notify('Failed screen: ', self.driver.screenshot())
+            self.gather_captures()
             
             return False
 
@@ -293,7 +311,7 @@ class DigTask(BaseTask):
                 return self.get_counter_seconds()
             else:
                 self._notify('[Dig Task] Cannot find the target')
-                self._photo_notify('Failed screen', self.driver.screenshot())
+                self._image_notify('Failed screen', self.driver.screenshot())
                 return -1
         return seconds
 
@@ -323,10 +341,12 @@ class DigTask(BaseTask):
                 # Sometimes others collect the gift too fast that the share button will not be available, so that this loop may become deal lock
                 if (cnt % 10 == 0):
                     img = self.driver.screenshot()
-                    if self.matcher.find_template(img, os.path.join(ASSETS_DIR, 'share_btn.png'),  scan_area=gift_scan_area) is not None or self.determine_dig_type(img) == DigType.UN:
+                    if  self.matcher.find_template(img, os.path.join(ASSETS_DIR, 'share_btn.png'),  scan_area=gift_scan_area) is not None or self.determine_dig_type(img) == DigType.UN:
+                        if self.matcher.find_template(img, os.path.join(ASSETS_DIR, 'gift_available.png'),  scan_area=gift_scan_area) is not None:
+                            continue
                         self._notify('[Dig Task] gift collected before able to collect')
                         save_capture(img, 'dig_capture', self.capture_dump_dir)
-                        self._photo_notify('current frame', img)
+                        self._image_notify('current frame', img)
                         return False
                 cnt += 1
             time.sleep(0.5)

@@ -14,6 +14,7 @@ class BaseTask:
         self.ocr_engine = OCREngine.shared()
         self._notifier = None
         self._photo_notifier = None
+        self._image_notifier = None
 
     def _notify(self, text: str):
         # print(f"[TG] {text}")
@@ -23,10 +24,17 @@ class BaseTask:
             except Exception as e:
                 print(f"[-] Notifier error: {e}")
 
-    def _photo_notify(self, text: str, img):
+    def _photo_notify(self, text: str, photo):
         if self._photo_notifier:
             try:
-                self._photo_notifier(text, img)
+                self._photo_notifier(text, photo)
+            except Exception as e:
+                print(f"[-] Notifier error: {e}")
+
+    def _image_notify(self, text: str, img):
+        if self._image_notifier:
+            try:
+                self._image_notifier(text, img)
             except Exception as e:
                 print(f"[-] Notifier error: {e}")
                 
@@ -35,8 +43,10 @@ class BaseTask:
         self._notifier = fn
 
     def set_photo_notifier(self, fn):
-        """fn(text) is called on engine events (logout, task results...)."""
         self._photo_notifier = fn
+
+    def set_image_notifier(self, fn):
+        self._image_notifier = fn
 
     def _raise_if_killed(self):
         if kill_event.is_set():

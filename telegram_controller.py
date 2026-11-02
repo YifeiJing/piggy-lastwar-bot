@@ -158,7 +158,27 @@ class TelegramController:
                 continue
             targets.append(chat_id)
         return targets
-
+    
+    def send_image(self, user_id: str, img, name):
+        if self._loop is None:
+            print(f'[TG] (not sent, bot not ready)')
+            return
+        prefix = f'[{user_id}] ' if len(self.engines) > 1 and user_id else ''
+        if name:
+            caption = f'{prefix}📸 {name}'
+        else:
+            caption = f'{prefix}📸'
+        ok, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            return False
+        
+        for chat_id in self._route_to_chats(user_id):
+            future = asyncio.run_coroutine_threadsafe(
+                self.application.bot.send_photo(chat_id=chat_id, photo=BytesIO(buf.tobytes()), caption=caption),
+                self._loop,
+            )
+            future.add_done_callback(_log_send_result)
+            
     def send_capture(self, user_id: str, capture_name: str, name: str = ''):
         """Called from an engine thread to push a reward capture photo.
 

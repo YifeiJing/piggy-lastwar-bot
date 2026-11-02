@@ -109,6 +109,7 @@ class BotEngine:
         self.current_task = None
         self._notifier = None
         self._photo_notifier = None
+        self._image_notifier = None
         self._thread = None
         self.team_state = TeamState.IDLE
         self._rally_preference = []
@@ -122,6 +123,7 @@ class BotEngine:
         for task in self._task_instances.values():
             task.set_notifier(self._notify)
             task.set_photo_notifier(self._photo_notifier)
+            task.set_image_notifier(self._image_notifier)
 
     # ---- remote control API ----
 
@@ -132,6 +134,10 @@ class BotEngine:
     def set_photo_notifier(self, fn):
         """fn(name, capture_name) is called when a reward capture is saved."""
         self._photo_notifier = fn
+
+    def set_image_notifier(self, fn):
+        """fn(name, img) is called."""
+        self._image_notifier = fn
 
     @property
     def status(self) -> str:
