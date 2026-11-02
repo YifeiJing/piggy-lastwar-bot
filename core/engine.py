@@ -105,6 +105,7 @@ class BotEngine:
         self.stop_event.set()                 # start in stopped state; /start to begin
         self.ocr_engine = OCREngine.shared()
         self.matcher = TemplateMatcher()
+        self.is_fresh_start = False
         self.current_task = None
         self._notifier = None
         self._photo_notifier = None
@@ -250,6 +251,7 @@ class BotEngine:
             return
         self.stop_event.clear()
         self.pause_event.clear()
+        self.is_fresh_start = True
         self._notify('▶️ Auto loop started.')
         # Show current settings
         self._notify(self.format_settings())
@@ -410,8 +412,8 @@ class BotEngine:
         finally:
             self.current_task = None
 
-    def _update_quad_state(self, screen):
-        pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'quad_leader.png'), scan_area=(2, 290, 350, 602))
+    def _update_squad_state(self, screen):
+        pos = self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'quad_leader.png'), scan_area=(2, 290, 350, 740))
         if pos:
             self.team_state = TeamState.RALLYING
         else:
@@ -438,10 +440,14 @@ class BotEngine:
                 if self._detect_logout(screen):
                     self.stats.print_stats()
                     self.driver.tap(450, 900)
-                    self.stop_event.set()
-                    self._notify('⚠️ Logout detected — auto loop stopped. Send /start to resume.')
+                    if not self.is_fresh_start:
+                        self.stop_event.set()
+                        self._notify('⚠️ Logout detected — auto loop stopped. Send /start to resume.')
+                    else:
+                        self._notify('⚠️ Logout detected — restarting game.')
+                        self.is_fresh_start = False
                     return
-                self._update_quad_state(screen)
+                self._update_squad_state(screen)
                 for name, asset, threshold, scan_area in CYCLE_DETECTORS:
                     if name not in self.enabled_tasks:
                         continue
