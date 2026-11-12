@@ -131,7 +131,7 @@ class ExitStuckStateTask(BaseTask):
             if pos_cancel:
                 self.driver.tap(pos_cancel[0], pos_cancel[1])
                 return True
-            return False
+            # return False
 
         if (self.ocr_engine.check_text_exists(screen, '任意位置', scan_area=(300, 1400, 500, 1500))):
             print("[*] Starting: Exit stuck state... [teleport]")
@@ -284,9 +284,11 @@ class DigTask(BaseTask):
         # send the sqaud out, here we do not select team, but there must be one team available
         if not self.wait_and_click(os.path.join(ASSETS_DIR, 'send_out_btn.png'), timeout=7):
             self._notify('Could not send out Squad, please check if there is at least 1 squad available')
-            self._image_notify('Failed screen: ', self.driver.screenshot())
+            screen = self.driver.screenshot()
+            self._image_notify('Failed screen: ', screen)
             self.gather_captures()
-            
+            if self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'dig_btn.png'), threshold=0.92, scan_area = (200, 800, 700, 1500)) is not None or self.matcher.find_template(screen, os.path.join(ASSETS_DIR, 'fix_btn.png'), threshold=0.92, scan_area = (200, 800, 700, 1500)) is not None:
+                self.driver.press_back()
             return False
 
         return True
@@ -415,8 +417,7 @@ class DigTask(BaseTask):
             self.driver.tap(pos[0], pos[1], jitter=3, sleep_time=0.3)
         if not self.navigate_to_dig_location():
             return False
-        if not self.go_to_dig():
-            return False
+        self.go_to_dig()
         if not self.wait_and_collect_gift():
             return False
         self.determine_result()

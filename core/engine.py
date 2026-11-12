@@ -453,6 +453,8 @@ class BotEngine:
                         self._notify('⚠️ Logout detected — restarting game.')
                         self.is_fresh_start = False
                     return
+                else:
+                    self.is_fresh_start = False
                 self._update_squad_state(screen)
                 for name, asset, threshold, scan_area in CYCLE_DETECTORS:
                     if name not in self.enabled_tasks:
